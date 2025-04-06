@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>로그인</title>
+</head>
+<body>
+    <h1>로그인 페이지</h1>
+    <form method="POST" action="{% url 'login' %}">
+        {% csrf_token %}
+        <label for="username">사용자 이름:</label>
+        <input type="text" id="username" name="username" required>
+        <br>
+        <label for="email">이메일:</label>
+        <input type="email" id="email" name="email" required>  <!-- 이메일 필드 추가 -->
+        <br>
+        <label for="password">비밀번호:</label>
+        <input type="password" id="password" name="password" required>
+        <br>
+        <button type="submit" name="login">로그인</button>
+    </form>
+    <a href="{% url 'signup' %}">회원가입</a>
+
+    {% if popup_message %}
+        <script>
+            alert("{{ popup_message }}");
+        </script>
+    {% endif %}
+</body>
+</html>

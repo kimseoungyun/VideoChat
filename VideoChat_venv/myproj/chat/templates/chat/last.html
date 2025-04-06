@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1:1 화상 채팅</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        video {
+            width: 45%; /* 비디오 크기 조정 */
+            border: 1px solid black;
+            margin: 10px;
+        }
+        #chat-container {
+            display: flex;
+            flex-direction: column;
+            width: 300px;
+            margin-top: 20px;
+        }
+        #messages {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        #message-input {
+            display: flex;
+        }
+        #message {
+            flex: 1;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>1:1 화상 채팅</h1>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+    
+    <div id="chat-container">
+        <div id="messages"></div>
+        <div id="message-input">
+            <input type="text" id="message" placeholder="메시지를 입력하세요" />
+            <button id="send-button">전송</button>
+        </div>
+    </div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const messagesContainer = document.getElementById('messages');
+        const messageInput = document.getElementById('message');
+        const sendButton = document.getElementById('send-button');
+        const roomName = "{{ room_name }}";  // Django 템플릿 변수
+        const signalingSocket = new WebSocket('ws://' + window.location.host + '/ws/chat/' + roomName + '/');
+
+        let localStream;
+        let peerConnection;
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' }
+            ]
+        };
+
+        signalingSocket.onopen = () => {
+            console.log('WebSocket is open now.');
+        };
+
+        signalingSocket.onclose = () => {
+            console.log('WebSocket is closed now.');
+        };
+
+        signalingSocket.onerror = (error) => {
+            console.error('WebSocket error observed:', error);
+        };
+
+        signalingSocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('Received message'); // 수신 메시지 로그
+            if (data.sdp) {
+                console.log('Received SDP:', data.sdp); // SDP 수신 로그
+                handleSDP(data.sdp);
+            } else if (data.candidate) {
+                console.log('Received ICE candidate:', data.candidate); // ICE 후보 로그
+                handleCandidate(data.candidate);
+            } else if (data.message) {
+                displayMessage(`상대: ${data.content}`);
+            }
+        };
+
+        window.onload = function() {
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then((stream) => {
+                    localVideo.srcObject = stream;  // 로컬 비디오에 스트림 연결
+                    localStream = stream;
+                    createPeerConnection();          // 피어 연결 생성
+                })
+                .catch(error => {
+                    console.error("Error accessing media devices.", error);
+                    alert("카메라 또는 마이크 접근을 허용해 주세요."); // 사용자에게 경고
+                });
+        };
+
+// 1. 첫 번째 function  => createPeerConnection() 함수
+
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(configuration);
+
+            // 로컬 스트림의 모든 트랙을 피어 연결에 추가
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            // Offer 생성 및 전송
+            peerConnection.createOffer()
+                .then(offer => {
+                    console.log('Creating offer:', offer); // Offer 생성 로그
+                    return peerConnection.setLocalDescription(offer);
+                })
+                .then(() => {
+                    if (signalingSocket.readyState === WebSocket.OPEN) {
+                        console.log('Sending SDP:', peerConnection.localDescription); 
+                        signalingSocket.send(JSON.stringify({ sdp: peerConnection.localDescription })); // SDP 전송 로그, 이제 ICE 후보 생성 가능
+                    }
+                })
+                .catch(error => {
+                    console.error("Error creating an offer:", error);
+                });
+            
+
+            // ICE 후보 수신 처리
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log('Adding ICE candidate:', event.candidate);
+                    if (signalingSocket.readyState === WebSocket.OPEN) {
+                        signalingSocket.send(JSON.stringify({ candidate: event.candidate })); // ice candidate 전송
+                    }
+                } else {
+                    console.log('All ICE candidates have been sent.');
+                }
+            };
+
+            // 원격 트랙 수신 처리
+            peerConnection.ontrack = (event) => {
+                console.log('Received remote track:', event.streams[0]); // 원격 트랙 로그
+                if (event.streams[0]) {
+                    remoteVideo.srcObject = event.streams[0];  // 원격 비디오에 스트림 연결
+                    console.log('complete remote track')
+                } else {
+                    console.error('No streams found in the event');
+                }
+            };
+
+            // ICE 연결 상태 변경 모니터링
+            peerConnection.oniceconnectionstatechange = (event) => {
+                console.log('ICE connection state changed to:', peerConnection.iceConnectionState);
+                if (peerConnection.iceConnectionState === 'connected') {
+                    console.log('Peers are connected!');
+                } else if (peerConnection.iceConnectionState === 'disconnected') {
+                    console.log('Peers are disconnected.');
+                } else if (peerConnection.iceConnectionState === 'failed') {
+                    console.error('ICE connection failed.');
+                } else if(peerConnection.iceConnectionState === "checking") {
+                    console.log("It is checking right now");
+                }
+            };
+        }
+
+
+//================================================================================================================================================
+// 2. 두 번재 function => handleSDP() 함수
+        function handleSDP(sdp) {
+            console.log('Setting remote SDP'); // SDP 설정 로그
+            // console.log('Current ICE candidates 0:', peerConnection.localDescription);
+            peerConnection.setRemoteDescription(new RTCSessionDescription(sdp))  // 이 부분을 거치고 peerConnection.localDescription = null이 된다.
+                .then(() => {
+                    console.log('Remote description set successfully');
+                    if (sdp.type === 'offer') {
+                        return peerConnection.createAnswer(); // Offer인 경우에만 Answer 생성
+                    }
+                    // } else {
+                    //     console.error('Received SDP is not an offer:', sdp.type);
+                    // }   
+                })
+                .then(answer => {
+                    console.log('Creating answer:', answer);
+                    return peerConnection.setLocalDescription(answer); // 로컬 설명 설정
+                })
+                .then(() => {
+                    // 생성된 Answer를 상대방에게 전송
+                    if (signalingSocket.readyState === WebSocket.OPEN) {
+                        signalingSocket.send(JSON.stringify({ sdp: peerConnection.localDescription }));
+                        console.log('Sending SDP Answer:', peerConnection.localDescription);
+                    }
+                })
+                .catch(error => {
+                    console.error("Error setting remote description:", error);
+                });
+        }
+
+        
+
+//================================================================================================================================================
+// 3. 세 번째 function => handleCandidate() 함수
+
+        function handleCandidate(candidate) {
+            console.log('process ICE candidate'); // 추가된 로그
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+                .then(() => {
+                    console.log('ICE candidate added successfully');
+                    console.log('ICE connection state:', peerConnection.iceConnectionState);
+                })
+                .catch(error => {
+                    console.error("Error adding received ice candidate:", error);
+                });
+        }
+
+//================================================================================================================================================
+
+        sendButton.addEventListener('click', sendMessage);
+        
+        messageInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        
+        function sendMessage() {
+            const message = messageInput.value;
+            if (message) {
+                if (signalingSocket.readyState === WebSocket.OPEN) {
+                    signalingSocket.send(JSON.stringify({ message: message }));
+                    messageInput.value = '';  // 입력 필드 초기화
+                    displayMessage(`나: ${message}`);  // 자신의 메시지 표시
+                } else {
+                    console.warn('WebSocket not open, cannot send message. Current state:', signalingSocket.readyState);
+                }
+            }
+        }
+
+        function displayMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messagesContainer.appendChild(messageElement);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;  // 스크롤을 아래로 이동
+        }
+    </script>
+</body>
+</html>

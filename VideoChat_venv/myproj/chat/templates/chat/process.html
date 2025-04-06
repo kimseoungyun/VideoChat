@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1:1 화상 채팅</title>
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/styles.css' %}">  <!-- CSS 파일 경로 -->
+</head>
+<body>
+    <h1>1:1 화상 채팅</h1>
+    
+    <!-- 로컬 비디오와 대체 이미지 -->
+    <div id="localVideoContainer">
+        <video id="localVideo" autoplay muted></video>
+        <img id="placeholder" src="{% static 'images/placeholder.png' %}" alt="카메라 꺼짐" style="display: none; width: 100%; height: auto;" />
+    </div>
+    
+    <!-- 원격 비디오와 대체 이미지 -->
+    <div id="remoteVideoContainer"> 
+        <video id="remoteVideo" autoplay style="display: none;"></video>
+        <img id="remote-placeholder" src="{% static 'images/placeholder.png' %}" alt="상대방 카메라 꺼짐" style="display: none; width: 100%; height: auto;" />
+    </div>
+
+    <!-- 이미지 컨테이너 -->
+    <div id="imageContainer">
+        <img id="localImage" src="{% static 'images/blackboard.png' %}" alt="로컬 이미지" style=" width: 100%; height: auto;" />
+        <!-- 로딩 화면 -->
+        <div id="loadingScreen" style="flex-direction: column; align-items: center; justify-content: center; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(255, 255, 255, 0.8); z-index: 999;">
+            <div id="loader" style="width: 50px; height: 50px; border: 8px solid transparent; border-top-color: transparent; border-left-color: #3498db; border-right-color: #e74c3c; border-bottom-color: #f1c40f; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <p id="loadingText" style="margin-top: 10px; font-size: 16px; font-weight: bold;">로딩 중...</p>
+        </div>
+    </div>  
+    
+    <button id="toggle-camera">카메라 끄기</button>  <!-- 카메라 토글 버튼 추가 -->
+    <button id="toggle-mute">음소거</button>  <!-- 음소거 토글 버튼 추가 -->
+    <button id="redirect-button">넘기기</button>  <!-- 방 이동 또는 생성 버튼 -->
+
+    <div id="chat-container">
+        <div id="messages"></div>
+        <div id="message-input">
+            <input type="text" id="message" placeholder="메시지를 입력하세요" />
+            <button id="send-button">전송</button>
+        </div>
+    </div>
+
+    <script>
+        const roomName = "{{ room_name }}";  // Django 템플릿 변수
+    </script>
+
+    <script src="{% static 'js/script.js' %}"></script>            <!-- JavaScript 파일 경로 -->
+</body>
+</html>

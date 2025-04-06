@@ -1,0 +1,62 @@
+WebRTC에서 ICE, SDP, Offer 및 연결 요청 수락에 대한 각각의 역할과 개념을 아래에서 설명하겠습니다.
+
+### 1. ICE와 SDP의 역할
+
+- **SDP (Session Description Protocol)**:
+  - SDP는 피어 간의 미디어 세션에 대한 정보를 설명하는 프로토콜입니다. 여기에는 비디오 및 오디오 코덱, 미디어 형식, 전송 포트, 네트워크 주소 등의 정보가 포함됩니다.
+  - SDP는 피어가 서로의 미디어 스트림을 이해할 수 있도록 하고, 어떤 방식으로 미디어를 전송할지를 결정하는 데 사용됩니다.
+  - 예를 들어, 한 피어가 비디오 스트림을 전송하고자 할 때, SDP를 통해 상대방에게 어떤 코덱을 사용해야 하는지, 어떤 포트를 통해 스트림을 수신해야 하는지를 알려줍니다.
+
+- **ICE (Interactive Connectivity Establishment)**:
+  - ICE는 NAT(Network Address Translation) 및 방화벽을 통과하여 피어 간의 연결을 설정하는 데 사용되는 프로토콜입니다.
+  - ICE 후보는 피어가 사용할 수 있는 네트워크 경로를 나타내며, 여러 후보를 수집하여 가장 적합한 경로를 선택합니다. 이 과정에서 STUN 및 TURN 서버를 활용하여 NAT 뒤에 있는 피어의 공인 IP 주소를 알아내거나 중계 서버를 통해 연결을 설정할 수 있습니다.
+  - ICE는 피어 간의 연결이 가능한지 확인하고, 최적의 경로를 선택하여 미디어 스트림을 전송하는 역할을 합니다.
+
+### 2. Offer과 SDP의 차이
+
+- **Offer**:
+  - Offer는 SDP 형식으로 작성된 연결 요청입니다. 한 피어가 다른 피어에게 연결을 요청할 때 생성되며, 그 피어가 수신할 미디어 정보와 연결 방법을 포함하고 있습니다.
+  - Offer는 SDP의 구체적인 형태로, 그 자체로도 SDP라고 볼 수 있지만, 연결 요청의 맥락에서 사용됩니다.
+
+- **SDP**:
+  - SDP는 기본적으로 세션 설명을 위한 언어이며, Offer와 Answer 모두에서 사용됩니다. 따라서 Offer는 SDP의 일종이라고 할 수 있습니다.
+  - Offer는 연결 요청을 나타내고, Answer는 상대방이 연결 요청을 수락했을 때 보내는 응답으로, 이 역시 SDP 형식입니다.
+
+### 3. 상대방이 연결 요청을 수락하는 방법
+
+상대방이 연결 요청을 수락하는 방법은 다음과 같은 과정으로 이루어집니다:
+
+1. **Offer 수신**: 상대방은 WebSocket 또는 다른 신호 서버를 통해 SDP Offer를 수신합니다.
+2. **setRemoteDescription 호출**: 수신한 Offer를 사용하여 `setRemoteDescription()` 메서드를 호출하여 원격 SDP를 설정합니다.
+3. **Answer 생성**: 상대방은 `createAnswer()` 메서드를 호출하여 응답을 생성합니다.
+4. **Answer 전송**: 생성된 Answer를 SDP 형식으로 상대방에게 전송합니다.
+5. **setLocalDescription 호출**: 처음 요청한 피어는 수신한 Answer를 사용하여 `setLocalDescription()`을 호출하여 자신의 로컬 설명을 설정합니다.
+
+### 4. ICE 후보 수신하여 연결하는 역할
+
+- ICE 후보를 수신하여 연결하는 과정은 다음과 같은 역할을 합니다:
+  - **네트워크 경로 선택**: 각 피어는 자신의 네트워크 환경에 따라 여러 ICE 후보를 생성합니다. 상대방의 ICE 후보를 수신하고 추가함으로써, 서로의 네트워크 경로를 이해하고 연결 가능성을 높입니다.
+  - **최적의 연결 경로 결정**: 수신된 ICE 후보는 NAT 및 방화벽을 통과할 수 있는 경로를 나타냅니다. 이 후보들을 통해 피어 간의 최적의 연결 경로를 선택합니다.
+  - **연결 안정성 향상**: ICE 후보는 연결 상태를 모니터링하고, 연결이 실패할 경우 대체 경로를 사용하여 안정적인 연결을 유지할 수 있도록 합니다.
+
+### 요약
+1. **SDP**는 미디어 세션 정보를 설명하고, **ICE**는 NAT와 방화벽을 통과하여 연결을 설정하는 데 사용됩니다.
+2. **Offer**는 연결 요청을 위한 SDP 형식의 데이터입니다.
+3. 상대방은 **Offer**를 수신하고 `setRemoteDescription()`을 통해 수락 후, **Answer**를 생성하여 전송합니다.
+4. ICE 후보를 수신하여 연결하는 과정은 최적의 네트워크 경로를 선택하고, 연결 안정성을 높이는 역할을 합니다.
+
+이러한 개념들이 WebRTC의 연결 과정에서 어떻게 작용하는지를 이해하는 데 도움이 되기를 바랍니다. 추가적인 질문이 있으시면 언제든지 말씀해 주세요! 
+
+이런 자료를 참고했어요.
+[1] 티스토리 - 2. webRTC의 SDP, ICE, 시그널링에 대해서 - 정리노트 - 티스토리 (https://yuia.tistory.com/148)
+[2] 티스토리 - WebRTC iOS 기본 플로우 코드 - Chance의 메모장 - 티스토리 (https://liveupdate.tistory.com/377)
+[3] velog - [Web] WebRTC 개념 및 동작원리 - velog (https://velog.io/@hosunghan0821/Web-WebRTC-%EA%B0%9C%EB%85%90-%EB%B0%8F-%EB%8F%99%EC%9E%91%EC%9B%90%EB%A6%AC)
+[4] rosypark.tistory.com - [WebRTC] 기본적인 개념과 코드 설명 (https://rosypark.tistory.com/291)
+[5] 네이버 블로그 - 349. Icu, Ics, Icw 및 Icm은 무엇을 의미합니까? - 네이버 블로그 (https://m.blog.naver.com/jsrhim516/221842939044)
+[6] SCP) - [SAP] SAP Fiori - SDK Kit 설치하기(Web IDE - SCP) (https://dhan-description.tistory.com/150)
+[7] 티스토리 - 파이썬(python)/ TCP-IP 통신 사용 - Blue Whale Wave - 티스토리 (https://esoog.tistory.com/entry/%ED%8C%8C%EC%9D%B4%EC%8D%ACpython-TCP-IP-%ED%86%B5%EC%8B%A0-%EC%82%AC%EC%9A%A9)
+[8] ciscovoip.tistory.com - SIP 용어 정리 API 코덱 ICE IP NAT SDP SIPS 등 (https://ciscovoip.tistory.com/18)
+[9] 네이버 블로그 - USB 충전 기능을 지원하는 포트와 규격에 관하여..(SDP / CDP ... (https://m.blog.naver.com/kwshop89/220282009916)
+[10] 프론트만셰 - [WebRTC] 화상 회의를 구현하는 방법 (1:1) - 프론트만셰 (https://hwanheejung.tistory.com/47) 
+
+뤼튼 사용하러 가기 > https://agent.wrtn.ai/5xb91l
