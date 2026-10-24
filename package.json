@@ -1,0 +1,13 @@
+{
+  "name": "videochat-browser-tests",
+  "private": true,
+  "scripts": {
+    "test:e2e": "node tests/browser.cjs && node tests/rtc-config.cjs",
+    "format": "prettier --write \"backend/**/*.css\" \"backend/**/*.js\" \"tests/*.cjs\""
+  },
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "prettier": "3.6.2"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

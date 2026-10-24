@@ -8,7 +8,7 @@ channels_redis==4.2.1
 constantly==23.10.4
 cryptography==44.0.2
 daphne==4.1.2
-Django==5.1.7
+Django==5.2.18
 hyperlink==21.0.0
 idna==3.10
 incremental==24.7.2

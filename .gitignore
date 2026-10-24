@@ -1,0 +1,17 @@
+.venv/
+VideoChat_venv/
+Redis-*.zip
+.runtime/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.env
+.env.*
+!.env.example
+*.db
+*.pem
+*.key
+*.log
+staticfiles/
+node_modules/
+test-results/
