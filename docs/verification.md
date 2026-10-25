@@ -39,11 +39,16 @@
 | 통화 통계 | 통과 | 양쪽이 보고해도 매칭당 1회 집계, 연결 시간 히스토그램, TURN 경유, ICE 복구 횟수 |
 | 신고 근거 | 통과 | 서버가 중계한 대화만 신고자·대상 구분해 저장, admin 읽기 전용 표시 |
 | 코드 리뷰 수정 | 통과 | 관리자 로그인 제한, 신고 시간당 제한, 다이얼로그를 연 시점의 상대를 신고(e2e 포함), 매칭 확정 실패 후 재탐색과 ping 때 재진입, 조건에 맞는 후보 우선, 대기 중 제재된 후보 제외, 재개 후 상대 채널 복구, TURN 전용 ICE, 보관 기한 삭제. 핵심 4건은 수정 전 코드에서 실패하는 것도 확인([code-review](code-review.md)) |
+| 매칭 전 확인 | 통과 | 동의 없이 join하면 서버가 거부, 두 항목 모두 필요, 약관 버전이 바뀌면 다시 동의, 본인인증 강제 시 미인증·미성년 거부, 인증된 성인은 `v…` 신원으로 매칭, 인증 후 외부 주소로 이동 불가, 운영 모드에서 개발용 인증 사용 시 시작 거부 |
+| 신고 검토·제재 | 통과 | 자동 제한 기록, 기각 시 해제(Redis 키 삭제), 인정 시 7일 제재, 이의 1회 접수와 수용 시 해제, 짧은 제재를 해제해도 긴 제재 유지, 보관 기간 지난 제재 삭제 |
+| 정책·계정 | 통과 | 약관·처리방침·수칙 페이지와 실제 보관 기간 표시, 비밀번호 확인 후 계정 삭제 |
+| 영상 흐림 | 통과 (e2e) | 기본은 흐림, 사용자가 끈 경우 흐리지 않음, 영상 보기로 해제 |
+| 화면 언어 | 통과 | 번역 누락 없음, 영어 화면에 한글 없음, 기본은 한국어(Accept-Language 무시), WebSocket 오류 번역, e2e로 영어 전환 확인, CI에서 .mo 재현성 확인 |
 | 모니터링 | 통과 (CI) | `promtool check rules`, Prometheus 수집 확인, Grafana 대시보드 자동 등록 |
 | Docker | 통과 (CI) | 개발 compose 기동 후 `/health/`, 운영 이미지(Daphne, DEBUG=0)에서 `/metrics/` 토큰 검사와 실제 WebSocket 200명 매칭 100% |
 
-- `python backend/manage.py test chat main`: **44 tests, OK** (2026-10-25, 로컬과 CI)
-- `npm run test:e2e`(browser, rtc-config, report, report-race, preferences), `npm run test:resilience`: **PASS**
+- `python backend/manage.py test chat main`: **64 tests, OK** (2026-10-25, 로컬과 CI)
+- `npm run test:e2e`(browser, rtc-config, report, report-race, preferences, i18n), `npm run test:resilience`: **PASS**
 - `makemigrations --check --dry-run`: **No changes detected**
 - `check --deploy`: 운영용 환경변수(무작위 SECRET_KEY)를 지정한 상태에서 **no issues**
 - `collectstatic --noinput`: 정적 파일 **134개 수집**

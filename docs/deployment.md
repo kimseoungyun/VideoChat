@@ -20,7 +20,9 @@
 | --- | --- |
 | `DJANGO_DEBUG` | `0` (기본값도 0. 개발에서만 `1`) |
 | `ICE_RELAY_ONLY` | `1`이면 TURN만 사용해 상대에게 공인 IP를 노출하지 않음(TURN 비용 증가) |
-| `REPORT_RETENTION_DAYS` | 신고·대화 보관 기간, 기본 90. `purge_reports`를 매일 실행 |
+| `REPORT_RETENTION_DAYS` | 신고·대화·제재 기록 보관 기간, 기본 90. `purge_reports`를 매일 실행 |
+| `CONSENT_REQUIRED` | `1`(기본). 매칭 전 연령·수칙 동의 |
+| `REQUIRE_VERIFIED_ADULT`, `IDENTITY_VERIFIER` | 국내 공개 운영 시 본인인증 업체 어댑터를 구현해 지정하고 `1`로. 개발용 `DevVerifier`는 운영 모드에서 시작 거부 |
 | `DJANGO_SECRET_KEY` | 50자 이상 무작위. 게스트 IP 해시에도 쓰이므로 바꾸면 기존 신고 누적/차단이 초기화됨 |
 | `DJANGO_ALLOWED_HOSTS` | 서비스 도메인 |
 | `TRUST_PROXY` | `1` (nginx가 `X-Forwarded-For`, `X-Forwarded-Proto`를 덮어쓸 때만) |

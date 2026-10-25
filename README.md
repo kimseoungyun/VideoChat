@@ -38,11 +38,13 @@ Django Channels · Redis · WebRTC로 만든 랜덤 1:1 화상 대화 서비스�
 - **언어·관심사 선호 매칭** — 공통 관심사가 많은 상대를 먼저 찾고, 10초가 지나면 조건을 풀어 누구와도 연결합니다. "기다리지 않고 가장 잘 맞는 사람" 방식은 측정해 보니 FIFO와 차이가 없어 채택하지 않았습니다([선호 매칭](docs/matching-preferences.md)).
 - **수평 확장** — ASGI 프로세스가 여러 개여도 상태는 Redis 한 곳에만 있습니다. 부하 시험에서 클라이언트를 4개 프로세스에 나눠 붙여 프로세스 간 매칭을 검증했습니다.
 - **남용 대응** — 게스트는 해시한 IP, 로그인 사용자는 계정 id로 식별합니다. IP별 동시 연결, 로그인 실패, 가입 횟수를 제한합니다. 신고하면 두 신원이 24시간 서로 매칭되지 않고, 서로 다른 3명이 신고하면 1시간 자동 제한됩니다([운영 기능](docs/operations.md)).
-- **신고 근거** — 신고하면 서버가 직접 중계한 최근 대화 20줄을 함께 저장합니다. 신고자가 내용을 꾸밀 수 없고, 신고하지 않으면 아무것도 저장하지 않습니다.
+- **안전 장치** — 매칭 전에 만 19세 이상·이용수칙 동의를 받고, 서버가 매칭마다 다시 확인합니다. 본인인증 어댑터를 켜면 인증된 성인만 매칭하고, 제재를 IP가 아닌 인증된 사람에게 붙입니다. 상대 영상은 처음에 흐리게 보이고 사용자가 직접 걷어 냅니다([안전 장치](docs/trust-and-safety.md)).
+- **신고 근거와 검토** — 신고하면 서버가 직접 중계한 최근 대화 20줄을 함께 저장합니다. 신고자가 내용을 꾸밀 수 없고, 신고하지 않으면 아무것도 저장하지 않습니다. 검토자가 신고를 인정하면 7일 제재, 기각하면 자동 제한을 해제하고, 제재받은 사람은 계정이 없어도 이의를 제기할 수 있습니다. 보관 기간이 지나면 자동으로 삭제합니다.
+- **한국어 / English** — 헤더에서 화면 언어를 고릅니다. 번역 누락은 테스트가 막습니다([i18n](docs/i18n.md)).
 - **관측 가능성** — `/metrics/`에서 매칭 대기시간, 통화 연결 성공률·소요 시간·TURN 경유, 끊김 복구, 거부·신고를 Prometheus 형식으로 제공합니다. `docker compose --profile monitoring up`으로 Grafana 대시보드와 경보 규칙 6개를 함께 띄웁니다.
 
 <p>
-  <img src="docs/images/preferences.png" alt="관심사를 고르고 공통 관심사가 표시된 매칭 화면" width="49%">
+  <img src="docs/images/veiled.png" alt="연결 직후 상대 영상이 흐리게 가려지고 영상 보기 버튼이 있는 화면" width="49%">
   <img src="docs/images/report-dialog.png" alt="신고 사유 선택 다이얼로그" width="49%">
 </p>
 
@@ -73,11 +75,11 @@ Redis는 미리 실행해 두세요(`docker compose up redis -d`). 전체 개발
 Redis를 실행한 상태에서 다음을 실행합니다.
 
 ```powershell
-.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 44개: 매칭·선호·재개·시그널링·신고·제한·지표·계정·마이그레이션·과부하
+.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 64개: 매칭·선호·재개·시그널링·동의·본인인증·신고 검토·제재·이의·제한·지표·i18n·계정
 npm install
 npx playwright install chromium firefox
 $env:BASE_URL = 'http://127.0.0.1:8000/chat/'
-npm run test:e2e         # 실제 브라우저로 WebRTC 연결, 채팅, 다음 상대, 재연결, 신고, 선호 매칭
+npm run test:e2e         # 실제 브라우저로 동의, WebRTC 연결, 채팅, 다음 상대, 재연결, 신고, 선호 매칭, 영상 흐림, 영어 화면
 npm run test:interop     # Chromium ↔ Firefox 영상 협상과 채팅 (CI는 Linux에서 실행)
 npm run test:resilience  # 통화 중 신호/미디어 끊김 후 같은 대화가 이어지는지 (시나리오별 5회)
 ```
@@ -106,6 +108,8 @@ npm run test:resilience  # 통화 중 신호/미디어 끊김 후 같은 대화�
 | [architecture](docs/architecture.md) | 책임 분리, 매칭 상태 전이, 장애 처리, 확장 제약 |
 | [operations](docs/operations.md) | 요청 제한, 신고/차단 정책, 지표, Grafana·경보 |
 | [competitive-analysis](docs/competitive-analysis.md) | Azar·OmeTV·Chatroulette 등 유사 서비스와 국내외 규제 비교, 보완점 |
+| [trust-and-safety](docs/trust-and-safety.md) | 매칭 전 동의·본인인증 어댑터, 영상 흐림, 신고 검토·제재·이의 제기, 국내 고시 대응 |
+| [i18n](docs/i18n.md) | 화면 언어 구조와 번역 추가 방법 |
 | [code-review](docs/code-review.md) | 독립 코드 리뷰 15건과 수정·검증 내역 |
 | [worklog](docs/worklog.md) | 날짜별 작업 기록: 무엇을, 왜, 어떤 결과로 |
 | [verification](docs/verification.md) | 자동 검증 범위와 남은 검증 |

@@ -7,7 +7,9 @@
 | Django views/forms | 화면, 회원가입 검증, 인증, 단기 TURN 자격증명, 로그인/가입/RTC 요청 제한 |
 | ChatConsumer | WebSocket 입력 검증, 속도 제한, IP별 연결 제한, 메시지 중계, 신고 접수(서버 중계 대화 근거 포함), 재개 토큰 발급, 끊긴 상대 유예 감시, 선호 재탐색, 통화 통계 수신, 연결 수명 |
 | Matchmaker + Lua | 원자적 매칭, 언어·관심사 선호와 대기 완화, 매칭 ID, 상대 제외, 신고 차단/제한 확인, 통화 보존(suspend)·재개(resume), presence lease, 매칭 지표 |
-| `chat/limits.py` | 신원(계정 id 또는 해시한 IP), 고정 윈도 제한, 동시 연결 집계, 카운터, 통화 품질 지표 집계 |
+| `chat/limits.py` | 신원(인증된 사람 → 계정 id → 해시한 IP), 고정 윈도 제한, 동시 연결 집계, 카운터, 통화 품질 지표 집계 |
+| `chat/trust.py`, `chat/verification.py` | 세션의 동의·본인인증 상태, 매칭 전 확인, 본인인증 어댑터 |
+| `chat/sanctions.py` + `Sanction`/`Appeal` | 제재 기록(SQL)과 Redis 제재 키 동기화, 이의 제기 |
 | 브라우저 controller | UI 상태, 로컬 장치, 선호 선택, WebRTC 협상, ICE restart, 끊김 시 통화 유지·재개, 통화 통계 보고, 재연결, 신고 다이얼로그 |
 | Redis channel layer | 프로세스 간 신호 전달 |
 | SQL | 회원/인증 데이터와 신고 기록(`chat.Report`). 매칭 경로에서는 사용하지 않음 |
@@ -28,7 +30,7 @@ flowchart LR
 ## 매칭
 
 1. 사용자가 시작을 누르고 카메라·마이크를 허용합니다.
-2. 미디어 준비 후 WebSocket을 열고 서버 ready에 join(선택한 언어·관심사 포함)으로 응답합니다.
+2. 미디어 준비 후 WebSocket을 열고 서버 ready에 join(선택한 언어·관심사 포함)으로 응답합니다. 서버는 join마다 세션을 다시 읽어 동의(와 설정에 따라 본인인증)를 확인하고, 없으면 매칭하지 않습니다([안전 장치](trust-and-safety.md)).
 3. Redis Lua가 대기열 앞쪽 후보 중 조건(언어·관심사, 또는 대기 완화)을 만족하고 관심사가 가장 많이 겹치는 한 명을 꺼내 양쪽에 동일한 UUID를 저장합니다. 적합한 상대가 없으면 대기열에 넣고, 선호가 있는 사용자는 완화 시간 뒤 스스로 다시 탐색합니다([선호 매칭](matching-preferences.md)).
 4. 대기하던 쪽만 offer를 만듭니다. 상대는 answer를 만들고 양쪽은 ICE 후보를 교환합니다.
    각 참가자는 PeerConnection 생성 직전에 캐시하지 않는 RTC 설정 API를 호출합니다. TURN 인증정보는 매번 새로 발급하며, 종료/다음 상대 조작은 진행 중인 요청을 취소합니다. 이전 요청이 완료되어도 현재 매칭 ID와 다르면 연결을 생성하지 않습니다.
