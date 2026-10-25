@@ -13,6 +13,18 @@ local key = prefix .. id
 redis.call('ZREMRANGEBYSCORE', queue, '-inf', now)
 local peer = redis.call('HGET', key, 'peer')
 local room = redis.call('HGET', key, 'match')
+local function tagset(text)
+    local set, count = {}, 0
+    for tag in string.gmatch(text or '', '[^,]+') do set[tag] = true; count = count + 1 end
+    return set, count
+end
+local function common(a, b)
+    local mine, shared = tagset(a), {}
+    for tag in string.gmatch(b or '', '[^,]+') do
+        if mine[tag] then table.insert(shared, tag) end
+    end
+    return shared
+end
 if action == 'leave' then
     redis.call('ZREM', queue, id)
     if peer and redis.call('HGET', prefix .. peer, 'match') == room then
@@ -65,7 +77,9 @@ if action == 'resume' then
     redis.call('EXPIRE', key, ttl)
     redis.call('HSET', prefix .. opeer, 'peer', id)
     -- The identity stays the original one: a network switch changes the guest's IP hash.
-    return {'resumed', opeer, oroom, old, kept[1] or who}
+    -- Everything the caller needs comes back here: a second read could see a peer that just left.
+    return {'resumed', opeer, oroom, kept[1] or who, redis.call('HGET', prefix .. opeer, 'who') or '',
+        table.concat(common(kept[2], redis.call('HGET', prefix .. opeer, 'tags')), ',')}
 end
 if peer and redis.call('HGET', prefix .. peer, 'match') ~= room then
     redis.call('HDEL', key, 'peer', 'match')
@@ -73,18 +87,6 @@ if peer and redis.call('HGET', prefix .. peer, 'match') ~= room then
     peer, room = false, false
 end
 
-local function tagset(text)
-    local set, count = {}, 0
-    for tag in string.gmatch(text or '', '[^,]+') do set[tag] = true; count = count + 1 end
-    return set, count
-end
-local function common(a, b)
-    local mine, shared = tagset(a), {}
-    for tag in string.gmatch(b or '', '[^,]+') do
-        if mine[tag] then table.insert(shared, tag) end
-    end
-    return shared
-end
 local function matched()
     local mine = redis.call('HGET', key, 'tags')
     local theirs = redis.call('HGET', prefix .. peer, 'tags')
@@ -125,7 +127,8 @@ local function observe(wait)
     redis.call('HINCRBY', metrics, 'match_wait_seconds_count', 1)
 end
 -- Preferences are honoured until either side has waited `seconds`; then anyone will do.
--- Among eligible candidates the most shared interests win, then the longest wait.
+-- A candidate that fits the preferences beats one admitted only by relaxing; then the most
+-- shared interests win, then the longest wait.
 local best, bestscore, bestkind
 for _, other in ipairs(redis.call('ZRANGE', queue, 0, 99)) do
     local otherkey = prefix .. other
@@ -133,9 +136,11 @@ for _, other in ipairs(redis.call('ZRANGE', queue, 0, 99)) do
         redis.call('ZREM', queue, other)
     elseif other ~= id and other ~= blocked and redis.call('HGET', otherkey, 'blocked') ~= id then
         local otherwho = redis.call('HGET', otherkey, 'who') or ''
-        -- Reports block both directions for the identity, not just this connection.
+        -- Reports block both directions for the identity, not just this connection; a ban
+        -- issued while someone already waits must also keep them from being picked.
         if redis.call('SISMEMBER', blocks .. who, otherwho) == 0
-                and redis.call('SISMEMBER', blocks .. otherwho, who) == 0 then
+                and redis.call('SISMEMBER', blocks .. otherwho, who) == 0
+                and redis.call('EXISTS', base .. 'ban:' .. otherwho) == 0 then
             local olang = redis.call('HGET', otherkey, 'lang') or ''
             local otags = redis.call('HGET', otherkey, 'tags') or ''
             local _, ocount = tagset(otags)
@@ -144,13 +149,15 @@ for _, other in ipairs(redis.call('ZRANGE', queue, 0, 99)) do
             local tagok = (mycount == 0 and ocount == 0) or shared > 0
             local osince = tonumber(redis.call('HGET', otherkey, 'since')) or now
             local relaxed = math.max(now - mysince, now - osince) >= seconds
-            if (langok and tagok) or relaxed then
-                if not best or shared > bestscore then
-                    best, bestscore = other, shared
-                    bestkind = (langok and tagok) and (shared > 0 and 'shared' or 'open') or 'relaxed'
+            local fits = langok and tagok
+            if fits or relaxed then
+                local score = (fits and 100 or 0) + shared
+                if not best or score > bestscore then
+                    best, bestscore = other, score
+                    bestkind = fits and (shared > 0 and 'shared' or 'open') or 'relaxed'
                 end
-                -- Nothing can beat sharing every interest (or any match, without interests).
-                if bestscore == mycount then break end
+                -- Nothing beats a fitting candidate sharing every interest (any fit, without interests).
+                if bestscore == 100 + mycount then break end
             end
         end
     end

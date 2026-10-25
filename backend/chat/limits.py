@@ -79,6 +79,15 @@ def hit(name, window):
         return 0
 
 
+def unhit(name):
+    """Give back one counted event (a login that turned out to succeed); never creates a key."""
+    try:
+        sync_redis().eval("if redis.call('EXISTS', KEYS[1]) == 1 then return redis.call('DECR', KEYS[1]) end",
+                          1, key('rate', name))
+    except RedisError:
+        pass
+
+
 def peek(name):
     try:
         return int(sync_redis().get(key('rate', name)) or 0)

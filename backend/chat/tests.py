@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import os
 import hashlib
 import hmac
 from unittest.mock import patch
@@ -133,6 +134,22 @@ class MatchmakingTests(SimpleTestCase):
             fields = await m.redis.hgetall(settings.MATCHMAKING_PREFIX + 'metrics')
             self.assertEqual(fields['matches_by_preference_total{kind="shared"}'], '1')
             self.assertEqual(fields['matches_by_preference_total{kind="relaxed"}'], '1')
+        await self.async_case(run)
+
+    @override_settings(MATCH_RELAX_SECONDS=1)
+    async def test_fitting_candidate_beats_one_admitted_by_relaxing(self):
+        async def run(m):
+            await m.join('x', 'wx', 'ja', [])
+            await m.join('k', 'wk', 'ko', [])  # x has not waited long enough to be relaxed yet
+            await asyncio.sleep(1.1)
+            self.assertEqual((await m.join('u', 'wu', 'ko', []))[:2], ['new_match', 'k'])
+        await self.async_case(run)
+
+    async def test_banned_identity_already_queued_is_skipped(self):
+        async def run(m):
+            await m.join('x', 'wx')
+            await m.redis.set(settings.MATCHMAKING_PREFIX + 'ban:wx', 1, ex=60)
+            self.assertEqual(await m.join('y', 'wy'), ['waiting'])
         await self.async_case(run)
 
     async def test_exclusion_survives_next_after_peer_already_left(self):
@@ -314,12 +331,12 @@ class ModerationTests(TransactionTestCase):
         self.assertGreater(int(state[1]), 0)
         self.assertEqual(await m.transition('join', 'other', 'ipC'), ['waiting'])
 
-    async def flaky_match_notices(self, failures):
-        """Make the first `failures` pair.ready sends fail as if the inbox stayed full."""
+    async def flaky_match_notices(self, failures, kind='pair.ready'):
+        """Make the first `failures` sends of `kind` fail as if the inbox stayed full."""
         real, left = ChatConsumer.deliver, [failures]
 
         async def deliver(consumer, channel, message):
-            if message['type'] == 'pair.ready' and left[0]:
+            if message['type'] == kind and left[0]:
                 left[0] -= 1
                 return False
             return await real(consumer, channel, message)
@@ -388,6 +405,81 @@ class ModerationTests(TransactionTestCase):
             self.assertEqual((await a3.receive_json_from())['type'], 'resume_failed')
         finally:
             for client in (b, a2, a3):
+                await client.disconnect()
+
+    async def test_lost_peer_moved_is_repaired_on_ping(self):
+        a, b, a2 = (communicator(f'10.0.8.{i}') for i in range(3))
+        try:
+            await self.connected(a, b, a2)
+            first, _ = await self.matched_pair(a, b)
+            await a.disconnect()
+            await b.receive_json_from()  # peer_reconnecting
+            with await self.flaky_match_notices(1, 'peer.moved'):
+                await a2.send_json_to({'type': 'resume', 'token': first['resume_token']})
+                self.assertEqual((await a2.receive_json_from())['type'], 'resumed')
+            self.assertTrue(await b.receive_nothing(timeout=0.2))  # b still relays to the dead channel
+            await b.send_json_to({'type': 'ping'})
+            self.assertEqual((await b.receive_json_from())['type'], 'peer_resumed')
+            self.assertEqual((await b.receive_json_from())['type'], 'pong')
+            await b.send_json_to({'type': 'chat', 'match_id': first['match_id'], 'message': 'fixed'})
+            self.assertEqual((await a2.receive_json_from())['message'], 'fixed')
+        finally:
+            for client in (b, a2):
+                await client.disconnect()
+
+    async def test_stranded_searching_user_is_requeued_on_ping(self):
+        a = communicator('10.0.9.1')
+        try:
+            await self.connected(a)
+            await a.send_json_to({'type': 'join'})
+            self.assertEqual((await a.receive_json_from())['type'], 'waiting')
+            # A match that fell through before it was announced leaves the user in no queue.
+            queue = settings.MATCHMAKING_PREFIX + 'queue'
+            redis = limits.shared_redis()
+            await redis.zrem(queue, *[m for m in await redis.zrange(queue, 0, -1)])
+            await a.send_json_to({'type': 'ping'})
+            self.assertEqual((await a.receive_json_from())['type'], 'pong')
+            self.assertEqual(await redis.zcard(queue), 1)
+        finally:
+            await a.disconnect()
+
+    async def test_report_targets_the_partner_chosen_when_the_dialog_opened(self):
+        a, b, c = (communicator(f'10.0.10.{i}') for i in range(3))
+        try:
+            await self.connected(a, b, c)
+            first, _ = await self.matched_pair(a, b)
+            await asyncio.sleep(1)
+            await c.send_json_to({'type': 'join'})
+            self.assertEqual((await c.receive_json_from())['type'], 'waiting')
+            await a.send_json_to({'type': 'next'})  # a is matched with c before reporting b
+            self.assertEqual((await a.receive_json_from())['type'], 'matched')
+            await c.receive_json_from()
+            await b.receive_json_from()  # peer_left
+            await a.send_json_to({'type': 'report', 'match_id': first['match_id'], 'reason': 'spam'})
+            self.assertEqual((await a.receive_json_from())['type'], 'reported')
+            self.assertEqual((await Report.objects.aget()).reported, limits.identity(
+                type('Guest', (), {'is_authenticated': False})(), '10.0.10.1'))
+            self.assertTrue(await c.receive_nothing(timeout=0.1))  # the call with c goes on
+        finally:
+            for client in (a, b, c):
+                await client.disconnect()
+
+    @override_settings(REPORTS_PER_HOUR=1)
+    async def test_reports_are_rate_limited_per_identity(self):
+        a, b, c = (communicator(f'10.0.11.{i}') for i in range(3))
+        try:
+            await self.connected(a, b, c)
+            first, _ = await self.matched_pair(a, b)
+            await a.send_json_to({'type': 'report', 'match_id': first['match_id'], 'reason': 'spam'})
+            self.assertEqual((await a.receive_json_from())['type'], 'reported')
+            await b.receive_json_from()
+            await asyncio.sleep(1)
+            second, _ = await self.matched_pair(a, c)
+            await a.send_json_to({'type': 'report', 'match_id': second['match_id'], 'reason': 'spam'})
+            self.assertEqual((await a.receive_json_from())['type'], 'error')
+            self.assertEqual(await Report.objects.acount(), 1)
+        finally:
+            for client in (a, b, c):
                 await client.disconnect()
 
     @override_settings(RESUME_GRACE_SECONDS=1)
@@ -509,6 +601,28 @@ class HttpLimitTests(TestCase):
         self.client.post('/logout/')
         self.client.post('/login/', {'username': 'tester', 'password': 'wrong'})
         self.assertEqual(self.client.post('/login/', {'username': 'tester', 'password': 'test-password-123!'}).status_code, 302)
+
+    def test_admin_login_is_throttled_like_the_site_login(self):
+        User.objects.create_superuser('admin', password='admin-password-123!')
+        for _ in range(settings.LOGIN_FAILURES_PER_USER):
+            self.assertEqual(self.client.post('/admin/login/', {'username': 'admin', 'password': 'x'}).status_code, 200)
+        response = self.client.post('/admin/login/', {'username': 'admin', 'password': 'admin-password-123!'})
+        self.assertEqual(response.status_code, 429)
+        self.assertNotIn('_auth_user_id', self.client.session)
+
+    @override_settings(TURN_URLS=['turn:relay.example.test:3478'], TURN_SECRET='s', ICE_RELAY_ONLY=True)
+    def test_relay_only_ice_hides_public_addresses(self):
+        self.assertEqual(self.client.get('/chat/rtc-config/').json()['iceTransportPolicy'], 'relay')
+
+    def test_purge_removes_reports_past_retention(self):
+        from datetime import timedelta
+        from django.core.management import call_command
+        from django.utils import timezone
+        old = Report.objects.create(reporter='a', reported='b', reason='spam', match_id='m1')
+        Report.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=91))
+        Report.objects.create(reporter='a', reported='c', reason='spam', match_id='m2')
+        call_command('purge_reports', days=90, stdout=open(os.devnull, 'w'))
+        self.assertEqual(list(Report.objects.values_list('match_id', flat=True)), ['m2'])
 
     def test_admin_shows_escaped_report_conversation(self):
         report = Report.objects.create(reporter='ipA', reported='ipB', reason='spam', match_id='m', evidence=[

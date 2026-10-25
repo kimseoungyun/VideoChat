@@ -4,7 +4,9 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEBUG = os.getenv('DJANGO_DEBUG', '1') == '1'
+# Off unless asked for: an image started without configuration must not run in debug mode
+# with the public development key (which would also make guest IP hashes reversible).
+DEBUG = os.getenv('DJANGO_DEBUG', '0') == '1'
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'local-development-only-not-for-production')
 if not DEBUG and SECRET_KEY == 'local-development-only-not-for-production':
     raise ImproperlyConfigured('Set DJANGO_SECRET_KEY in production.')
@@ -65,6 +67,11 @@ REPORT_BAN_THRESHOLD = int(os.getenv('REPORT_BAN_THRESHOLD', '3'))  # distinct r
 REPORT_WINDOW_SECONDS = 24 * 3600
 REPORT_BAN_SECONDS = int(os.getenv('REPORT_BAN_SECONDS', '3600'))
 REPORT_BLOCK_SECONDS = 24 * 3600
+REPORTS_PER_HOUR = 20  # per identity; each report writes a row with chat evidence
+# Reports (and their chat evidence) are deleted after this many days: manage.py purge_reports
+REPORT_RETENTION_DAYS = int(os.getenv('REPORT_RETENTION_DAYS', '90'))
+# Relay-only ICE hides each user's public IP from the stranger, at the cost of TURN bandwidth.
+ICE_RELAY_ONLY = os.getenv('ICE_RELAY_ONLY', '0') == '1'
 METRICS_TOKEN = os.getenv('METRICS_TOKEN', '')
 TURN_URLS = [url for url in os.getenv('TURN_URLS', '').split(',') if url]
 TURN_SECRET = os.getenv('TURN_SECRET', '')

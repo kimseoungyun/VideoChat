@@ -61,6 +61,8 @@ function status(title, detail = "") {
   $("status").textContent = title;
   $("status-detail").textContent = detail;
   $("connection-badge").textContent = title;
+  // #status is hidden once video plays; announce through a region that never hides.
+  $("live-status").textContent = detail ? `${title}. ${detail}` : title;
 }
 function notice(message = "") {
   $("notice").textContent = message;
@@ -148,9 +150,11 @@ async function onConnected(pc) {
     });
   }
 }
-function requestRestart(pc) {
+// setup: the socket dropped before media ever connected, so the offer/answer may be lost;
+// renegotiate instead of failing the call that was just resumed.
+function requestRestart(pc, setup = false) {
   if (peer !== pc || restarting) return;
-  if (!everConnected) return failCall("영상 연결에 실패했어요");
+  if (!everConnected && !setup) return failCall("영상 연결에 실패했어요");
   if (restartAttempts >= 2) return failCall("영상 연결을 복구하지 못했어요");
   beginRestart(pc);
   if (initiator) offerRestart(pc);
@@ -195,10 +199,9 @@ function mediaState() {
 }
 function syncMedia() {
   const state = mediaState();
+  // The label states the action; adding aria-pressed too would read "카메라 켜기, pressed".
   $("toggle-camera").textContent = state.video ? "카메라 끄기" : "카메라 켜기";
   $("toggle-mute").textContent = state.audio ? "마이크 끄기" : "마이크 켜기";
-  $("toggle-camera").setAttribute("aria-pressed", String(!state.video));
-  $("toggle-mute").setAttribute("aria-pressed", String(!state.audio));
   $("localVideo").style.visibility = state.video ? "visible" : "hidden";
   $("local-empty").hidden = state.video;
   if (matchId) send({ type: "media", match_id: matchId, ...state });
@@ -241,6 +244,7 @@ async function start() {
     $("toggle-camera").disabled = $("toggle-mute").disabled = false;
     $("start").hidden = true;
     $("next").hidden = false;
+    $("stop").focus(); // the focused start button just disappeared
     syncMedia();
     connect(run);
   } catch (error) {
@@ -363,7 +367,7 @@ async function handle(data) {
     notice();
     enableNext();
     if (peer?.connectionState === "connected") showConnected();
-    else if (peer) requestRestart(peer);
+    else if (peer) requestRestart(peer, true);
   } else if (data.type === "resume_failed") {
     closePeer();
     message("연결이 끊긴 사이 대화가 종료됐어요.", "system");
@@ -376,7 +380,7 @@ async function handle(data) {
     );
   } else if (data.type === "peer_resumed" && data.match_id === matchId) {
     if (peer?.connectionState === "connected") showConnected();
-    else if (peer) requestRestart(peer);
+    else if (peer) requestRestart(peer, true);
   } else if (data.type === "matched") {
     closePeer();
     notice();
@@ -493,10 +497,12 @@ async function handle(data) {
       (data.audio ? "" : " · 음소거") +
       (data.video ? "" : " · 카메라 꺼짐");
   } else if (data.type === "reported") {
-    status(
-      "신고가 접수됐어요",
-      "이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요.",
-    );
+    // A report on the previous partner must not overwrite the status of the current call.
+    if (!matchId)
+      status(
+        "신고가 접수됐어요",
+        "이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요.",
+      );
     message("신고가 접수되었습니다.", "system");
   } else if (data.type === "banned") {
     stop();
@@ -564,8 +570,11 @@ $("preferences").addEventListener("change", (event) => {
   } catch {}
 });
 $("preferences").addEventListener("submit", (event) => event.preventDefault());
+// Fixed when the dialog opens: a new partner can be matched while the reason is chosen.
+let reportTarget = null;
 $("report").addEventListener("click", () => {
   if (!lastMatch) return;
+  reportTarget = lastMatch;
   $("report-form").reset();
   $("report-dialog").returnValue = "";
   $("report-dialog").showModal();
@@ -573,14 +582,25 @@ $("report").addEventListener("click", () => {
 $("report-cancel").addEventListener("click", () => $("report-dialog").close());
 $("report-dialog").addEventListener("close", () => {
   const reason = new FormData($("report-form")).get("reason");
-  if ($("report-dialog").returnValue !== "submit" || !reason || !lastMatch)
-    return;
-  if (send({ type: "report", match_id: lastMatch, reason })) {
-    lastMatch = null;
-    $("report").disabled = true;
-    closePeer();
-    status("신고를 접수하고 있어요");
+  const target = reportTarget;
+  reportTarget = null;
+  const submitted =
+    $("report-dialog").returnValue === "submit" &&
+    reason &&
+    target &&
+    send({ type: "report", match_id: target, reason });
+  if (submitted) {
+    if (lastMatch === target) {
+      lastMatch = null;
+      $("report").disabled = true;
+    }
+    if (matchId === target) {
+      closePeer();
+      status("신고를 접수하고 있어요");
+    }
   }
+  // Focus would otherwise fall to <body> (the report button may now be disabled).
+  if (active) ($("next").disabled ? $("stop") : $("next")).focus();
 });
 for (const [id, kind] of [
   ["toggle-camera", "video"],

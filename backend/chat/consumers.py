@@ -4,7 +4,7 @@ import json
 import logging
 import secrets
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import suppress
 from datetime import datetime, timezone
 from channels.db import database_sync_to_async
@@ -27,12 +27,14 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.matcher = Matchmaker()
         # Set only from Redis-confirmed pair_ready; relays trust these instead of re-reading Redis.
         self.match_id = self.peer = None
-        # The last partner stays reportable after they leave, until the next match.
-        self.last_match = self.last_peer_who = None
+        # The last two matches stay reportable (a report dialog can still be open when the next
+        # match starts), each with the chat this server relayed: evidence nobody can forge.
+        self.history = OrderedDict()
         self.resume_token = None
         self.prefs = ('', ())
-        # Chat relayed through this socket in the current match: report evidence nobody can forge.
-        self.recent = deque(maxlen=20)
+        # True while the browser shows "searching"; lets a ping requeue a stranded user.
+        self.waiting = False
+        self.last_ping = 0
         self.rematch = self.peer_watch = None
         self.tokens = 100.0
         self.updated = time.monotonic()
@@ -116,6 +118,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             self.resume_token = None
         peer, match = await self.matcher.transition('leave', self.channel_name)
         self.match_id = self.peer = None
+        self.waiting = False
         if peer:
             # Undelivered, the peer still notices on its next ping (state mismatch).
             await self.deliver(peer, {'type': 'peer.left', 'match_id': match})
@@ -146,7 +149,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def handle(self, data):
         kind = data.get('type')
         if kind == 'ping':
-            self.last_seen = time.monotonic()
+            self.last_seen = now = time.monotonic()
+            # Browsers ping every 15s; extra pings must not each cost several Redis calls.
+            if now - self.last_ping < 5:
+                return await self.send_json({'type': 'pong'})
+            self.last_ping = now
             await limits.refresh_connection(self.ip_key, self.channel_name, settings.PRESENCE_TTL)
             state = await self.matcher.transition('state', self.channel_name)
             if state[0] == 'expired':
@@ -154,6 +161,13 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 return
             if self.match_id and (state[0] != 'matched' or state[2] != self.match_id):
                 await self.peer_left({'match_id': self.match_id})
+            elif self.match_id and state[1] != self.peer:
+                # A lost peer.moved after a resume would otherwise relay into a dead channel.
+                await self.peer_moved({'match_id': self.match_id, 'channel': state[1]})
+            elif self.waiting and state[0] == 'idle':
+                # Searching in the browser but neither queued nor matched in Redis (a match
+                # that fell through before it was announced): put the user back in the queue.
+                await self.try_match(announce=False)
             await self.send_json({'type': 'pong'})
         elif kind in ('join', 'next'):
             if time.monotonic() - self.last_join < 1:
@@ -226,22 +240,27 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         for attempt in range(attempts):
             state = await self.matcher.join(self.channel_name, self.who, *self.prefs)
             if state[0] == 'waiting':
+                self.waiting = True
                 if announce:
                     await self.send_json({'type': 'waiting'})
                 return 'waiting'
             if state[0] == 'banned':
+                self.waiting = False
                 await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
                 return 'banned'
             if state[0] != 'new_match':
                 return state[0]
             _, peer, match = state
             if await self.deliver(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True}):
-                await self.pair_ready({'match_id': match, 'initiator': False})
-                return 'matched'
+                # The peer may have left while the notice was in flight: then just search again.
+                if await self.pair_ready({'match_id': match, 'initiator': False}):
+                    return 'matched'
+                continue
             # Never leave a half-announced match: the peer would wait on a pair it never saw.
             # Requeue the peer and match again ourselves; matching only runs on join, so
             # requeueing both would strand them until someone new arrives.
             await self.matcher.transition('release' if attempt < attempts - 1 else 'unpair', self.channel_name)
+        self.waiting = True
         if announce:
             await self.send_json({'type': 'waiting'})
         return 'waiting'
@@ -264,9 +283,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if state[0] != 'resumed':
             await limits.acount('sessions_resumed_total{outcome="expired"}')
             return await self.send_json({'type': 'resume_failed'})
-        self.who = state[4]
-        _, peer, match, peer_who, common = await self.matcher.transition('state', self.channel_name)
-        self.peer, self.match_id, self.last_match, self.last_peer_who = peer, match, match, peer_who
+        _, peer, match, self.who, peer_who, common = state
+        self.peer, self.match_id = peer, match
+        # Report history and evidence lived in the dropped socket; start a fresh record.
+        self.track(match, peer_who)
         self.resume_token = secrets.token_urlsafe(18)
         await self.matcher.issue_resume_token(self.channel_name, self.resume_token)
         await limits.acount('sessions_resumed_total{outcome="resumed"}')
@@ -277,44 +297,57 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def record_stats(self, data):
         event, match = data.get('event'), data.get('match_id')
         setup_ms, restart_ms = data.get('setup_ms'), data.get('restart_ms')
-        if event not in CALL_EVENTS or not match or match != self.last_match \
+        if event not in CALL_EVENTS or match not in self.history \
                 or not all(v is None or (isinstance(v, int) and 0 <= v <= 120000) for v in (setup_ms, restart_ms)) \
                 or not isinstance(data.get('relay', False), bool):
             raise ValueError
         await limits.record_call(match, event, setup_ms, data.get('relay', False), restart_ms)
 
+    def track(self, match, peer_who):
+        self.history[match] = {'who': peer_who, 'lines': deque(maxlen=20)}
+        while len(self.history) > 2:
+            self.history.popitem(last=False)
+
     def remember(self, sender, text):
-        self.recent.append({'from': sender, 'text': text, 'at': datetime.now(timezone.utc).isoformat()})
+        if self.match_id in self.history:
+            self.history[self.match_id]['lines'].append(
+                {'from': sender, 'text': text[:500], 'at': datetime.now(timezone.utc).isoformat()})
 
     async def report(self, data):
-        reason = data.get('reason')
-        if reason not in Report.Reason.values or not self.last_match or data.get('match_id') != self.last_match:
+        reason, match = data.get('reason'), data.get('match_id')
+        if reason not in Report.Reason.values or match not in self.history:
             raise ValueError
-        target, match = self.last_peer_who, self.last_match
-        self.last_match = self.last_peer_who = None  # one report per match
+        if await limits.ahit('report:' + self.who, 3600) > settings.REPORTS_PER_HOUR:
+            await self.send_json({'type': 'error', 'message': '신고가 너무 많습니다. 잠시 후 다시 시도해 주세요.'})
+            return
+        entry = self.history.pop(match)  # one report per match
+        target = entry['who']
         # Guests sharing an IP share an identity: blocking or counting it would hit the
         # reporter too, so they only get the per-connection exclusion that leave() sets.
         banned = target != self.who and await self.matcher.report(self.who, target)
         await limits.acount('reports_total')
         await database_sync_to_async(Report.objects.create)(
             reporter=self.who, reported=target, reason=reason, match_id=match, banned=banned,
-            evidence=list(self.recent))
+            evidence=list(entry['lines']))
         if self.match_id == match:
             await self.leave()
         await self.send_json({'type': 'reported', 'match_id': match})
 
     async def pair_ready(self, event):
+        """Announce a Redis-confirmed match; False when it already fell through."""
         state = await self.matcher.transition('state', self.channel_name)
-        if state[0] == 'matched' and state[2] == event['match_id']:
-            self.stop_task(self.rematch)
-            self.peer, self.match_id, self.last_peer_who = state[1], state[2], state[3]
-            self.last_match = self.match_id
-            self.recent.clear()
-            self.resume_token = secrets.token_urlsafe(18)
-            await self.matcher.issue_resume_token(self.channel_name, self.resume_token)
-            await self.send_json({'type': 'matched', 'match_id': state[2], 'initiator': event['initiator'],
-                                  'resume_token': self.resume_token,
-                                  'common': [t for t in state[4].split(',') if t]})
+        if state[0] != 'matched' or state[2] != event['match_id']:
+            return False
+        self.stop_task(self.rematch)
+        self.waiting = False
+        self.peer, self.match_id = state[1], state[2]
+        self.track(self.match_id, state[3])
+        self.resume_token = secrets.token_urlsafe(18)
+        await self.matcher.issue_resume_token(self.channel_name, self.resume_token)
+        await self.send_json({'type': 'matched', 'match_id': state[2], 'initiator': event['initiator'],
+                              'resume_token': self.resume_token,
+                              'common': [t for t in state[4].split(',') if t]})
+        return True
 
     async def peer_left(self, event):
         if self.match_id == event['match_id']:
