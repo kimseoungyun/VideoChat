@@ -25,6 +25,16 @@ if action == 'leave' then
     end
     return {peer or '', room or ''}
 end
+if action == 'unpair' then
+    -- The peer could not be told about the match: put both back in the queue unblocked.
+    if peer and redis.call('HGET', prefix .. peer, 'match') == room then
+        redis.call('HDEL', prefix .. peer, 'peer', 'match')
+        redis.call('ZADD', queue, now + ttl, peer)
+    end
+    redis.call('HDEL', key, 'peer', 'match')
+    redis.call('ZADD', queue, now + ttl, id)
+    return {'waiting'}
+end
 if peer and redis.call('HGET', prefix .. peer, 'match') ~= room then
     redis.call('HDEL', key, 'peer', 'match')
     redis.call('HSET', key, 'blocked', peer)

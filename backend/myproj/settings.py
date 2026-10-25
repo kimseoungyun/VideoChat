@@ -41,7 +41,10 @@ DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3',
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
 REDIS_POOL_SIZE = int(os.getenv('REDIS_POOL_SIZE', '50'))
 CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
-                              'CONFIG': {'hosts': [REDIS_URL], 'capacity': 200, 'expiry': 30}}}
+                              # capacity bounds one process's shared inbox, so it scales with
+                              # sockets per process, not per conversation.
+                              'CONFIG': {'hosts': [REDIS_URL], 'expiry': 30,
+                                         'capacity': int(os.getenv('CHANNEL_CAPACITY', '5000'))}}}
 MATCHMAKING_PREFIX = os.getenv('MATCHMAKING_PREFIX', 'videochat:{match}:')
 PRESENCE_TTL = 60
 # Abuse limits. Guests behind one NAT share an IP, so per-IP caps are deliberately loose.

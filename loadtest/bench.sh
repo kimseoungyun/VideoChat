@@ -27,9 +27,9 @@ serve() {
 
 stop() { kill "${pids[@]}" 2>/dev/null || true; wait "${pids[@]}" 2>/dev/null || true; }
 
-# workers clients ramp
-cases=("1 1000 0" "1 1000 10" "4 2000 0" "4 2000 10")
-for workers in 1 4; do
+# "workers clients ramp" per case; override with CASES="1 1000 0;4 2000 0"
+IFS=';' read -r -a cases <<<"${CASES:-1 1000 0;1 1000 10;4 2000 0;4 2000 10}"
+for workers in $(for c in "${cases[@]}"; do echo "${c%% *}"; done | sort -un); do
   serve "$workers"
   for c in "${cases[@]}"; do
     read -r w clients ramp <<<"$c"

@@ -90,6 +90,20 @@ class MatchmakingTests(SimpleTestCase):
             await m.transition('leave', 'c')
         await self.async_case(run)
 
+    async def test_unpair_requeues_both_without_blocking(self):
+        async def run(m):
+            await m.transition('join', 'a')
+            match = await m.transition('join', 'b')
+            self.assertEqual(match[0], 'new_match')
+            self.assertEqual(await m.transition('unpair', 'b'), ['waiting'])
+            self.assertEqual(await m.transition('state', 'a'), ['waiting'])
+            self.assertEqual(await m.transition('state', 'b'), ['waiting'])
+            self.assertEqual((await m.transition('join', 'c'))[0], 'new_match')
+            again = await m.transition('join', 'd')
+            self.assertEqual(again[0], 'new_match')
+            self.assertEqual({again[1], (await m.transition('state', 'c'))[1]}, {'a', 'b'})
+        await self.async_case(run)
+
     async def test_exclusion_survives_next_after_peer_already_left(self):
         async def run(m):
             await m.transition('join', 'a')

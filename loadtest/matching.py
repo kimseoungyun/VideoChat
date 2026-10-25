@@ -74,7 +74,8 @@ async def current_client(i, args, result, release):
             result['done'] += 1
             await release.wait()
     except (asyncio.TimeoutError, OSError, websockets.WebSocketException) as error:
-        result['failures'][f'{phase}:{type(error).__name__}'] += 1
+        code = getattr(getattr(error, 'rcvd', None), 'code', None)
+        result['failures'][f'{phase}:{type(error).__name__}' + (f':{code}' if code else '')] += 1
 
 
 def legacy_room(args, base):

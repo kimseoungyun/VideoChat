@@ -13,6 +13,7 @@ FAMILIES = {
     'match_wait_seconds': ('histogram', 'Time a user waited in the queue before being paired'),
     'reports_total': ('counter', 'User reports'),
     'bans_total': ('counter', 'Temporary bans issued by report threshold'),
+    'channel_full_dropped_total': ('counter', 'Channel-layer messages dropped after backoff (inbox full)'),
     'queue_waiting': ('gauge', 'Users waiting for a partner'),
     'ws_active': ('gauge', 'Live WebSocket connections'),
 }

@@ -5,6 +5,7 @@ import logging
 import time
 from contextlib import suppress
 from channels.db import database_sync_to_async
+from channels.exceptions import ChannelFull
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
 from redis.exceptions import RedisError
@@ -13,6 +14,8 @@ from .matchmaking import Matchmaker
 from .models import Report
 
 logger = logging.getLogger(__name__)
+# Every socket of a process shares one channel-layer inbox; back off while it drains.
+BACKOFF = (0, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
 
 
 class ChatConsumer(AsyncJsonWebsocketConsumer):
@@ -68,11 +71,23 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         except RedisError:
             logger.warning('Presence cleanup deferred to TTL')
 
+    async def deliver(self, channel, message):
+        """Send through the channel layer; False if the recipient's inbox stayed full for ~3s."""
+        for delay in BACKOFF:
+            await asyncio.sleep(delay)
+            with suppress(ChannelFull):
+                await self.channel_layer.send(channel, message)
+                return True
+        logger.warning('Channel layer full, dropped %s', message['type'])
+        await limits.acount('channel_full_dropped_total')
+        return False
+
     async def leave(self):
         peer, match = await self.matcher.transition('leave', self.channel_name)
         self.match_id = self.peer = None
         if peer:
-            await self.channel_layer.send(peer, {'type': 'peer.left', 'match_id': match})
+            # Undelivered, the peer still notices on its next ping (state mismatch).
+            await self.deliver(peer, {'type': 'peer.left', 'match_id': match})
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         now = time.monotonic()
@@ -123,8 +138,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
             elif state[0] == 'new_match':
                 _, peer, match = state
-                await self.channel_layer.send(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True})
-                await self.pair_ready({'match_id': match, 'initiator': False})
+                if await self.deliver(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True}):
+                    await self.pair_ready({'match_id': match, 'initiator': False})
+                else:
+                    # Never leave a half-announced match: the peer would wait on a pair it never saw.
+                    await self.matcher.transition('unpair', self.channel_name)
+                    await self.send_json({'type': 'waiting'})
         elif kind == 'leave':
             await self.leave()
             await self.send_json({'type': 'idle'})
@@ -159,7 +178,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     raise ValueError
                 payload['signal'] = signal
             # A peer that already moved on has a different match_id and drops this in relay().
-            await self.channel_layer.send(self.peer, {'type': 'relay', 'payload': payload})
+            await self.deliver(self.peer, {'type': 'relay', 'payload': payload})
         else:
             raise ValueError
 

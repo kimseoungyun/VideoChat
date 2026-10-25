@@ -27,6 +27,8 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: nproc; ulimit -n; free -g
       - run: LABEL=linux-ci REPEAT=3 bash loadtest/bench.sh
+      - name: Backpressure stress (tiny channel-layer inbox)
+        run: CHANNEL_CAPACITY=50 LABEL=linux-ci-capacity50 REPEAT=2 CASES="1 1000 0" bash loadtest/bench.sh
       - name: Publish results as annotations and summary
         if: always()
         run: |
