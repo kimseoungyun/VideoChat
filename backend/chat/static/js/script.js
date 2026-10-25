@@ -1,5 +1,12 @@
 const $ = (id) => document.getElementById(id);
 const configUrl = JSON.parse($("rtc-config").textContent).url;
+// What the server knows about this browser's consent/verification; it re-checks on every join.
+const trust = JSON.parse($("trust").textContent);
+// Translations come from Django's JavaScript catalog (/jsi18n/); identity when it is missing.
+const _ = window.gettext || ((text) => text);
+const format = (text, values) => (window.interpolate ? interpolate(text, values) : text.replace(/%s/g, () => values.shift()));
+// An error whose message is already written for the user.
+class UserFacingError extends Error {}
 let configRequest;
 let socket, stream, peer, matchId, heartbeat, connectTimer, reconnectTimer;
 let generation = 0,
@@ -44,7 +51,30 @@ function restorePreferences() {
     if (saved.lang) $("pref-lang").value = saved.lang;
     for (const input of document.querySelectorAll('input[name="interests"]'))
       input.checked = (saved.interests || []).includes(input.value);
+    if (saved.veil === false) $("pref-veil").checked = false;
   } catch {}
+}
+function veil(on) {
+  $("remoteVideo").classList.toggle("veiled", on);
+  $("reveal").hidden = !on;
+}
+function noticeWithLink(text, href, label) {
+  notice(text + " ");
+  const link = document.createElement("a");
+  link.href = href;
+  link.textContent = label;
+  $("notice").append(link);
+}
+function openConsent() {
+  if (trust.minor) {
+    notice(format(_("만 %s세 미만은 이용할 수 없어요."), [trust.min_age]));
+    return;
+  }
+  $("consent-form").reset();
+  $("consent-error").textContent = "";
+  $("consent-verify").hidden = !(trust.verification_required && !trust.verified);
+  $("consent-dialog").returnValue = "";
+  $("consent-dialog").showModal();
 }
 function enableNext() {
   clearTimeout(nextTimer);
@@ -106,17 +136,18 @@ function closePeer() {
   candidates = [];
   $("remoteVideo").srcObject = null;
   $("remote-empty").hidden = false;
-  $("peer-label").textContent = "새로운 친구";
+  $("peer-label").textContent = _("새로운 친구");
+  veil(false);
   chatEnabled(false);
 }
 function failCall(title) {
   if (!everConnected) report("failed");
   closePeer();
-  status(title, "다음 상대를 눌러 다시 시도해 주세요.");
+  status(title, _("다음 상대를 눌러 다시 시도해 주세요."));
 }
 function showConnected() {
   $("remote-empty").hidden = true;
-  status("대화가 연결됐어요");
+  status(_("대화가 연결됐어요"));
   chatEnabled(true);
 }
 async function usesRelay(pc) {
@@ -154,8 +185,8 @@ async function onConnected(pc) {
 // renegotiate instead of failing the call that was just resumed.
 function requestRestart(pc, setup = false) {
   if (peer !== pc || restarting) return;
-  if (!everConnected && !setup) return failCall("영상 연결에 실패했어요");
-  if (restartAttempts >= 2) return failCall("영상 연결을 복구하지 못했어요");
+  if (!everConnected && !setup) return failCall(_("영상 연결에 실패했어요"));
+  if (restartAttempts >= 2) return failCall(_("영상 연결을 복구하지 못했어요"));
   beginRestart(pc);
   if (initiator) offerRestart(pc);
   else send({ type: "signal", match_id: matchId, signal: { restart: true } });
@@ -164,7 +195,7 @@ function beginRestart(pc) {
   restarting = true;
   restartAttempts++;
   restartStarted = performance.now();
-  status("연결 복구 중", "영상 연결을 다시 맺고 있습니다.");
+  status(_("연결 복구 중"), _("영상 연결을 다시 맺고 있습니다."));
   clearTimeout(restartTimer);
   restartTimer = setTimeout(() => {
     if (peer === pc && restarting) finishRestart(pc, false);
@@ -200,20 +231,22 @@ function mediaState() {
 function syncMedia() {
   const state = mediaState();
   // The label states the action; adding aria-pressed too would read "카메라 켜기, pressed".
-  $("toggle-camera").textContent = state.video ? "카메라 끄기" : "카메라 켜기";
-  $("toggle-mute").textContent = state.audio ? "마이크 끄기" : "마이크 켜기";
+  $("toggle-camera").textContent = state.video ? _("카메라 끄기") : _("카메라 켜기");
+  $("toggle-mute").textContent = state.audio ? _("마이크 끄기") : _("마이크 켜기");
   $("localVideo").style.visibility = state.video ? "visible" : "hidden";
   $("local-empty").hidden = state.video;
   if (matchId) send({ type: "media", match_id: matchId, ...state });
 }
 async function start() {
   if (active) return;
+  if (!trust.consented || (trust.verification_required && !trust.verified))
+    return openConsent();
   active = true;
   const run = ++generation;
   $("start").disabled = true;
   $("stop").disabled = false;
   notice();
-  status("카메라와 마이크 확인 중", "브라우저의 접근 권한을 허용해 주세요.");
+  status(_("카메라와 마이크 확인 중"), _("브라우저의 접근 권한을 허용해 주세요."));
   try {
     if (!navigator.mediaDevices?.getUserMedia)
       throw new Error("secure-context");
@@ -235,7 +268,7 @@ async function start() {
         if (active) {
           stop();
           notice(
-            "카메라 또는 마이크 연결이 끊어졌습니다. 장치를 확인해 주세요.",
+            _("카메라 또는 마이크 연결이 끊어졌습니다. 장치를 확인해 주세요."),
           );
         }
       }),
@@ -251,27 +284,27 @@ async function start() {
     if (run !== generation) return;
     stop();
     const errors = {
-      NotAllowedError: "카메라와 마이크 권한을 허용한 후 다시 시작해 주세요.",
+      NotAllowedError: _("카메라와 마이크 권한을 허용한 후 다시 시작해 주세요."),
       NotFoundError:
-        "카메라와 마이크를 찾을 수 없습니다. 장치 연결을 확인해 주세요.",
+        _("카메라와 마이크를 찾을 수 없습니다. 장치 연결을 확인해 주세요."),
       NotReadableError:
-        "다른 앱에서 장치를 사용 중일 수 있습니다. 장치를 확인해 주세요.",
+        _("다른 앱에서 장치를 사용 중일 수 있습니다. 장치를 확인해 주세요."),
       AbortError:
-        "장치를 시작하지 못했습니다. 다른 앱이 카메라를 사용 중인지 확인해 주세요.",
+        _("장치를 시작하지 못했습니다. 다른 앱이 카메라를 사용 중인지 확인해 주세요."),
       OverconstrainedError:
-        "지원되는 카메라 해상도를 찾지 못했습니다. 다른 카메라를 연결해 주세요.",
+        _("지원되는 카메라 해상도를 찾지 못했습니다. 다른 카메라를 연결해 주세요."),
     };
     notice(
       !window.isSecureContext
-        ? "카메라를 열 수 없습니다. HTTPS 또는 localhost에서 접속해 주세요."
+        ? _("카메라를 열 수 없습니다. HTTPS 또는 localhost에서 접속해 주세요.")
         : errors[error.name] ||
-            "카메라를 열 수 없습니다. 장치 연결과 브라우저 권한을 확인해 주세요.",
+            _("카메라를 열 수 없습니다. 장치 연결과 브라우저 권한을 확인해 주세요."),
     );
   }
 }
 function connect(run) {
   if (!active || run !== generation) return;
-  if (!resumeToken) status("서버 연결 중");
+  if (!resumeToken) status(_("서버 연결 중"));
   $("next").disabled = true;
   const ws = new WebSocket(
     (location.protocol === "https:" ? "wss://" : "ws://") +
@@ -306,13 +339,13 @@ function connect(run) {
         ) {
           closePeer();
           status(
-            "연결을 완료하지 못했어요",
-            "다음 상대를 눌러 다시 연결해 주세요.",
+            _("연결을 완료하지 못했어요"),
+            _("다음 상대를 눌러 다시 연결해 주세요."),
           );
           notice(
-            error.message.startsWith("같은 네트워크")
+            error instanceof UserFacingError
               ? error.message
-              : "미디어 연결에 실패했습니다. 네트워크를 확인해 주세요.",
+              : _("미디어 연결에 실패했습니다. 네트워크를 확인해 주세요."),
           );
         }
       });
@@ -328,26 +361,26 @@ function connect(run) {
     if (event.code === 4029) {
       stop();
       notice(
-        "같은 네트워크에서 연결이 너무 많습니다. 다른 탭을 닫고 잠시 후 다시 시도해 주세요.",
+        _("같은 네트워크에서 연결이 너무 많습니다. 다른 탭을 닫고 잠시 후 다시 시도해 주세요."),
       );
       return;
     }
     $("next").disabled = true;
     if (++reconnects > 3) {
       stop();
-      notice("서버에 연결할 수 없습니다. 잠시 후 다시 시작해 주세요.");
+      notice(_("서버에 연결할 수 없습니다. 잠시 후 다시 시작해 주세요."));
       return;
     }
     if (keepCall) {
       chatEnabled(false);
-      status("연결 복구 중", "대화를 유지한 채 서버에 다시 연결하고 있습니다.");
-    } else status("연결이 끊어졌어요", "서버에 다시 연결하고 있습니다.");
+      status(_("연결 복구 중"), _("대화를 유지한 채 서버에 다시 연결하고 있습니다."));
+    } else status(_("연결이 끊어졌어요"), _("서버에 다시 연결하고 있습니다."));
     reconnectTimer = setTimeout(
       () => connect(run),
       keepCall ? 500 * reconnects : 1000 * 2 ** (reconnects - 1),
     );
   };
-  ws.onerror = () => notice("서버 연결을 확인하고 있습니다.");
+  ws.onerror = () => notice(_("서버 연결을 확인하고 있습니다."));
 }
 async function handle(data) {
   if (data.type === "ready") {
@@ -360,7 +393,7 @@ async function handle(data) {
   } else if (data.type === "waiting") {
     closePeer();
     enableNext();
-    status("대화 상대를 찾고 있어요", "상대가 준비되면 자동으로 연결됩니다.");
+    status(_("대화 상대를 찾고 있어요"), _("상대가 준비되면 자동으로 연결됩니다."));
   } else if (data.type === "resumed" && data.match_id === matchId) {
     resumeToken = data.resume_token;
     reconnects = 0;
@@ -370,13 +403,13 @@ async function handle(data) {
     else if (peer) requestRestart(peer, true);
   } else if (data.type === "resume_failed") {
     closePeer();
-    message("연결이 끊긴 사이 대화가 종료됐어요.", "system");
+    message(_("연결이 끊긴 사이 대화가 종료됐어요."), "system");
     join();
   } else if (data.type === "peer_reconnecting" && data.match_id === matchId) {
     chatEnabled(false);
     status(
-      "상대방 연결이 잠시 끊겼어요",
-      `${data.grace}초 동안 다시 연결되기를 기다립니다.`,
+      _("상대방 연결이 잠시 끊겼어요"),
+      format(_("%s초 동안 다시 연결되기를 기다립니다."), [data.grace]),
     );
   } else if (data.type === "peer_resumed" && data.match_id === matchId) {
     if (peer?.connectionState === "connected") showConnected();
@@ -388,13 +421,14 @@ async function handle(data) {
     resumeToken = data.resume_token;
     initiator = data.initiator;
     matchedAt = performance.now();
+    veil($("pref-veil").checked);
     $("report").disabled = false;
     enableNext();
-    status("새로운 연결을 준비 중", "영상과 음성을 연결하고 있습니다.");
+    status(_("새로운 연결을 준비 중"), _("영상과 음성을 연결하고 있습니다."));
     sharedLabel = (data.common || []).map(interestLabel).join(" · ");
     if (sharedLabel) {
-      $("peer-label").textContent = "새로운 친구 · " + sharedLabel;
-      message("공통 관심사: " + sharedLabel, "system");
+      $("peer-label").textContent = _("새로운 친구 · ") + sharedLabel;
+      message(_("공통 관심사: ") + sharedLabel, "system");
     }
     const id = matchId;
     const controller = new AbortController();
@@ -407,7 +441,7 @@ async function handle(data) {
         signal: controller.signal,
       });
       if (response.status === 429)
-        throw new Error("같은 네트워크에서 연결 요청이 많습니다. 잠시 후 다음 상대를 눌러 주세요.");
+        throw new UserFacingError(_("같은 네트워크에서 연결 요청이 많습니다. 잠시 후 다음 상대를 눌러 주세요."));
       if (!response.ok) throw new Error("RTC configuration unavailable");
       config = await response.json();
     } finally {
@@ -431,7 +465,7 @@ async function handle(data) {
         .play()
         .catch((error) => {
           if (error.name === "NotAllowedError")
-            notice("상대방 음성을 재생하려면 화면을 한 번 눌러 주세요.");
+            notice(_("상대방 음성을 재생하려면 화면을 한 번 눌러 주세요."));
         });
     };
     pc.onconnectionstatechange = () => {
@@ -439,7 +473,7 @@ async function handle(data) {
       if (pc.connectionState === "connected") onConnected(pc);
       else if (pc.connectionState === "failed") requestRestart(pc);
       else if (pc.connectionState === "disconnected") {
-        status("연결 복구 중", "네트워크 연결을 확인하고 있습니다.");
+        status(_("연결 복구 중"), _("네트워크 연결을 확인하고 있습니다."));
         // "disconnected" often heals by itself; restart only if it lingers.
         clearTimeout(disconnectTimer);
         disconnectTimer = setTimeout(() => {
@@ -449,7 +483,7 @@ async function handle(data) {
       }
     };
     connectTimer = setTimeout(() => {
-      if (peer === pc && !everConnected) failCall("연결 시간이 초과됐어요");
+      if (peer === pc && !everConnected) failCall(_("연결 시간이 초과됐어요"));
     }, 25000);
     syncMedia();
     if (initiator) {
@@ -459,10 +493,10 @@ async function handle(data) {
   } else if (data.type === "peer_left" && data.match_id === matchId) {
     closePeer();
     status(
-      "상대방이 대화를 종료했어요",
-      "다음 상대를 눌러 새로운 대화를 시작하세요.",
+      _("상대방이 대화를 종료했어요"),
+      _("다음 상대를 눌러 새로운 대화를 시작하세요."),
     );
-    message("상대방이 나갔습니다.", "system");
+    message(_("상대방이 나갔습니다."), "system");
   } else if (data.type === "signal" && data.match_id === matchId && peer) {
     const pc = peer;
     if (data.signal.restart) {
@@ -489,26 +523,39 @@ async function handle(data) {
       else candidates.push(data.signal.candidate);
     }
   } else if (data.type === "chat" && data.match_id === matchId) {
-    message(data.username + ": " + data.message);
+    message((data.username || _("상대방")) + ": " + data.message);
   } else if (data.type === "media" && data.match_id === matchId) {
     $("peer-label").textContent =
-      "상대방" +
+      _("상대방") +
       (sharedLabel ? " · " + sharedLabel : "") +
-      (data.audio ? "" : " · 음소거") +
-      (data.video ? "" : " · 카메라 꺼짐");
+      (data.audio ? "" : _(" · 음소거")) +
+      (data.video ? "" : _(" · 카메라 꺼짐"));
   } else if (data.type === "reported") {
     // A report on the previous partner must not overwrite the status of the current call.
     if (!matchId)
       status(
-        "신고가 접수됐어요",
-        "이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요.",
+        _("신고가 접수됐어요"),
+        _("이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요."),
       );
-    message("신고가 접수되었습니다.", "system");
+    message(_("신고가 접수되었습니다."), "system");
   } else if (data.type === "banned") {
     stop();
-    notice(
-      `신고가 누적되어 이용이 일시 제한되었습니다. 약 ${Math.ceil(data.retry_after / 60)}분 후 다시 시도해 주세요.`,
+    noticeWithLink(
+      format(_("신고가 누적되어 이용이 일시 제한되었습니다. 약 %s분 후 다시 시도해 주세요."), [
+        Math.ceil(data.retry_after / 60),
+      ]),
+      `/chat/appeal/${encodeURIComponent(data.appeal)}/`,
+      _("이의 제기"),
     );
+  } else if (
+    data.type === "consent_required" ||
+    data.type === "verification_required"
+  ) {
+    // The server re-checks on every join (consent can expire or the terms change).
+    stop();
+    if (data.type === "consent_required") trust.consented = false;
+    else trust.verified = false;
+    openConsent();
   } else if (data.type === "error") notice(data.message);
 }
 function stop() {
@@ -540,15 +587,15 @@ function stop() {
       true;
   reconnects = 0;
   status(
-    "새로운 대화를 시작해 보세요",
-    "대화 시작을 누르면 상대를 찾아드립니다.",
+    _("새로운 대화를 시작해 보세요"),
+    _("대화 시작을 누르면 상대를 찾아드립니다."),
   );
 }
 $("start").addEventListener("click", start);
 $("stop").addEventListener("click", stop);
 $("next").addEventListener("click", () => {
   if (Date.now() < nextAllowed) {
-    notice("잠시 후 다시 눌러 주세요.");
+    notice(_("잠시 후 다시 눌러 주세요."));
     return;
   }
   if (socket?.readyState !== WebSocket.OPEN) return;
@@ -556,18 +603,40 @@ $("next").addEventListener("click", () => {
   enableNext();
   closePeer();
   notice();
-  status("대화 상대를 찾고 있어요");
+  status(_("대화 상대를 찾고 있어요"));
   join("next");
 });
 $("preferences").addEventListener("change", (event) => {
   const checked = document.querySelectorAll('input[name="interests"]:checked');
   if (checked.length > 3) {
     event.target.checked = false;
-    notice("관심사는 3개까지 고를 수 있어요.");
+    notice(_("관심사는 3개까지 고를 수 있어요."));
   }
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(preferences()));
+    localStorage.setItem(
+      PREFS_KEY,
+      JSON.stringify({ ...preferences(), veil: $("pref-veil").checked }),
+    );
   } catch {}
+});
+$("reveal").addEventListener("click", () => veil(false));
+$("consent-cancel").addEventListener("click", () => $("consent-dialog").close());
+$("consent-dialog").addEventListener("close", async () => {
+  if ($("consent-dialog").returnValue !== "submit") return;
+  const body = new FormData($("consent-form"));
+  const response = await fetch(trust.consent_url, {
+    method: "POST",
+    body,
+    headers: { "X-CSRFToken": body.get("csrfmiddlewaretoken") },
+  }).catch(() => null);
+  if (!response?.ok) {
+    notice(_("동의를 저장하지 못했어요. 잠시 후 다시 시도해 주세요."));
+    return;
+  }
+  trust.consented = true;
+  if (trust.verification_required && !trust.verified)
+    location.assign(trust.verify_url);
+  else start();
 });
 $("preferences").addEventListener("submit", (event) => event.preventDefault());
 // Fixed when the dialog opens: a new partner can be matched while the reason is chosen.
@@ -596,7 +665,7 @@ $("report-dialog").addEventListener("close", () => {
     }
     if (matchId === target) {
       closePeer();
-      status("신고를 접수하고 있어요");
+      status(_("신고를 접수하고 있어요"));
     }
   }
   // Focus would otherwise fall to <body> (the report button may now be disabled).
@@ -623,7 +692,7 @@ $("message-form").addEventListener("submit", (event) => {
     !$("send-button").disabled &&
     send({ type: "chat", match_id: matchId, message: text })
   ) {
-    message("나: " + text, "mine");
+    message(_("나: ") + text, "mine");
     $("message").value = "";
   }
 });

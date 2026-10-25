@@ -6,6 +6,7 @@
 // within 15 s and never sees the "partner left" state.
 // Usage: node tests/resilience.cjs [trials=5] [--assert]   (prints one JSON summary)
 const { chromium } = require("playwright");
+const { begin } = require("./helpers.cjs");
 
 const trials = Number(process.argv.find((a) => /^\d+$/.test(a)) || 5);
 const mustPass = process.argv.includes("--assert");
@@ -73,9 +74,9 @@ async function connected(pages) {
 }
 
 async function trial(a, b, scenario, index) {
-  await a.getByRole("button", { name: "대화 시작" }).click();
+  await begin(a);
   await a.waitForFunction(() => document.querySelector("#status").textContent.includes("찾고"));
-  await b.getByRole("button", { name: "대화 시작" }).click();
+  await begin(b);
   await connected([a, b]);
   await b.evaluate(() => {
     window.sawLeft = false;

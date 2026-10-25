@@ -6,5 +6,7 @@
 *.html text eol=lf
 *.lua text eol=lf
 *.sh text eol=lf
+*.po text eol=lf
+*.mo binary
 *.yml text eol=lf
 *.md text eol=lf

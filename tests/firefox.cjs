@@ -1,5 +1,6 @@
 // Cross-browser WebRTC: a Chromium user and a Firefox user must negotiate media and chat.
 const { chromium, firefox } = require("playwright");
+const { begin } = require("./helpers.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
@@ -30,11 +31,11 @@ const assert = require("node:assert/strict");
       page.on("pageerror", (error) => errors.push(error.message));
     const url = process.env.BASE_URL || "http://127.0.0.1:8017/chat/";
     await Promise.all(pages.map((p) => p.goto(url)));
-    await a.getByRole("button", { name: "대화 시작" }).click();
+    await begin(a);
     await a.waitForFunction(() =>
       document.querySelector("#status").textContent.includes("찾고"),
     );
-    await b.getByRole("button", { name: "대화 시작" }).click();
+    await begin(b);
     for (const p of pages) {
       await p.waitForFunction(
         () => !document.querySelector("#send-button").disabled,

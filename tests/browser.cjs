@@ -1,4 +1,5 @@
 const { chromium } = require("playwright");
+const { begin } = require("./helpers.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 (async () => {
@@ -46,11 +47,11 @@ const fs = require("node:fs");
       path: "test-results/lobby-desktop.png",
       fullPage: true,
     });
-    await pages[0].getByRole("button", { name: "대화 시작" }).click();
+    await begin(pages[0]);
     await pages[0].waitForFunction(() =>
       document.querySelector("#status").textContent.includes("찾고"),
     );
-    await pages[1].getByRole("button", { name: "대화 시작" }).click();
+    await begin(pages[1]);
     for (const p of pages.slice(0, 2)) {
       await p.waitForFunction(
         () => !document.querySelector("#send-button").disabled,
@@ -85,7 +86,7 @@ const fs = require("node:fs");
       fullPage: true,
     });
     await pages[2].bringToFront();
-    await pages[2].getByRole("button", { name: "대화 시작" }).click();
+    await begin(pages[2]);
     await pages[2].waitForFunction(() =>
       document.querySelector("#status").textContent.includes("찾고"),
     );
@@ -106,7 +107,7 @@ const fs = require("node:fs");
     );
     await pages[2].getByRole("button", { name: "종료", exact: true }).click();
     await pages[1].getByRole("button", { name: "종료", exact: true }).click();
-    await pages[1].getByRole("button", { name: "대화 시작" }).click();
+    await begin(pages[1]);
     await pages[1].waitForFunction(() =>
       document.querySelector("#status").textContent.includes("찾고"),
     );
@@ -130,6 +131,7 @@ const fs = require("node:fs");
     const beforeDenied = await pages[2].evaluate(
       () => window.testSockets.length,
     );
+    // Already consented; denied media must stop at the start button (begin() would wait for it to hide).
     await pages[2].getByRole("button", { name: "대화 시작" }).click();
     await pages[2]
       .getByText("카메라와 마이크 권한을 허용한 후 다시 시작해 주세요.", {

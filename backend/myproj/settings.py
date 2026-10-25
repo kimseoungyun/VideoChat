@@ -20,6 +20,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'myproj.locale.ChosenLanguageMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -73,6 +74,20 @@ REPORT_RETENTION_DAYS = int(os.getenv('REPORT_RETENTION_DAYS', '90'))
 # Relay-only ICE hides each user's public IP from the stranger, at the cost of TURN bandwidth.
 ICE_RELAY_ONLY = os.getenv('ICE_RELAY_ONLY', '0') == '1'
 METRICS_TOKEN = os.getenv('METRICS_TOKEN', '')
+# Trust gate before matching. Korea treats random chat without identity verification as
+# harmful to minors (MOGEF notice 2020): ask for age + rules consent, and optionally require a
+# verified adult through an identity provider adapter (see chat/verification.py).
+MIN_AGE = 19
+CONSENT_VERSION = '2026-10-25'  # bump when terms or rules change: everyone consents again
+CONSENT_REQUIRED = os.getenv('CONSENT_REQUIRED', '1') == '1'
+REQUIRE_VERIFIED_ADULT = os.getenv('REQUIRE_VERIFIED_ADULT', '0') == '1'
+IDENTITY_VERIFIER = os.getenv('IDENTITY_VERIFIER', 'chat.verification.DevVerifier' if DEBUG else '')
+if not DEBUG and IDENTITY_VERIFIER.endswith('DevVerifier'):
+    raise ImproperlyConfigured('DevVerifier accepts any input; configure a real identity provider.')
+if REQUIRE_VERIFIED_ADULT and not IDENTITY_VERIFIER:
+    raise ImproperlyConfigured('REQUIRE_VERIFIED_ADULT needs IDENTITY_VERIFIER.')
+SANCTION_DAYS = int(os.getenv('SANCTION_DAYS', '7'))  # when a moderator upholds a report
+APPEALS_PER_HOUR = 5  # per IP
 TURN_URLS = [url for url in os.getenv('TURN_URLS', '').split(',') if url]
 TURN_SECRET = os.getenv('TURN_SECRET', '')
 AUTH_PASSWORD_VALIDATORS = [
@@ -82,7 +97,9 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 LOGIN_URL = '/login/'
-LANGUAGE_CODE = 'ko-kr'
+LANGUAGE_CODE = 'ko'
+LANGUAGES = [('ko', '한국어'), ('en', 'English')]
+LOCALE_PATHS = [BASE_DIR / 'locale']
 TIME_ZONE = 'Asia/Seoul'
 USE_I18N = True
 USE_TZ = True

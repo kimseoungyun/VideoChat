@@ -1,6 +1,7 @@
 // A report dialog opened for the previous partner must still report that partner, even if a new
 // partner is matched while the reason is being chosen (code review finding #3).
 const { chromium } = require("playwright");
+const { begin } = require("./helpers.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
@@ -22,9 +23,9 @@ const assert = require("node:assert/strict");
     const inCall = (page) =>
       page.waitForFunction(() => !document.querySelector("#send-button").disabled, null, { timeout: 30000 });
 
-    await a.getByRole("button", { name: "대화 시작" }).click();
+    await begin(a);
     await statusIncludes(a, "찾고");
-    await b.getByRole("button", { name: "대화 시작" }).click();
+    await begin(b);
     await Promise.all([inCall(a), inCall(b)]);
 
     await a.waitForTimeout(1300);
@@ -34,7 +35,7 @@ const assert = require("node:assert/strict");
     const dialog = a.getByRole("dialog", { name: "이 상대를 신고할까요?" });
     await dialog.getByLabel("스팸·광고").check();
 
-    await c.getByRole("button", { name: "대화 시작" }).click(); // a is matched with c meanwhile
+    await begin(c); // a is matched with c meanwhile
     await Promise.all([inCall(a), inCall(c)]);
     await dialog.getByRole("button", { name: "신고하기" }).click();
     await a.getByText("신고가 접수되었습니다.", { exact: true }).waitFor();

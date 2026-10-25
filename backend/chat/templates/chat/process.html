@@ -1,61 +1,81 @@
-{% load static %}
+{% load static i18n %}{% get_current_language as LANGUAGE_CODE %}{% url 'safety' as safety_url %}{% url 'terms' as terms_url %}{% url 'privacy' as privacy_url %}
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="{{ LANGUAGE_CODE }}">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
-  <title>VideoChat · 새로운 대화의 시작</title>
+  <title>VideoChat · {% translate "새로운 대화의 시작" %}</title>
   <link rel="stylesheet" href="{% static 'css/styles.css' %}">
 </head>
 <body>
-<header class="site-header"><a class="brand" href="/">◈ <span>VideoChat</span></a><span class="header-note">서로 다른 일상, 하나의 대화</span><a class="account" href="{% url 'login' %}">로그인 ↗</a></header>
+<header class="site-header"><a class="brand" href="/">◈ <span>VideoChat</span></a><span class="header-note">{% translate "서로 다른 일상, 하나의 대화" %}</span>
+  <form class="language-switch" action="{% url 'set_language' %}" method="post">{% csrf_token %}<input name="next" type="hidden" value="{{ request.path }}"><label class="sr-only" for="ui-language">{% translate "화면 언어" %}</label><select id="ui-language" name="language" onchange="this.form.requestSubmit()">{% get_available_languages as ui_languages %}{% for code, name in ui_languages %}<option value="{{ code }}"{% if code == LANGUAGE_CODE %} selected{% endif %}>{{ name }}</option>{% endfor %}</select><noscript><button type="submit">{% translate "변경" %}</button></noscript></form>
+  <a class="account" href="{% url 'login' %}">{% translate "로그인" %} ↗</a></header>
 <main>
-  <div class="intro"><div><span class="eyebrow">MEET SOMEONE NEW</span><h1>오늘의 새로운 연결.</h1><p>카메라를 확인하고, 가볍게 인사를 건네보세요.</p></div><span class="pill" id="connection-badge" aria-hidden="true">시작할 준비가 됐어요</span><p class="sr-only" id="live-status" role="status" aria-live="polite"></p></div>
-  <form class="preferences" id="preferences" aria-label="매칭 선호">
-    <label class="pref-language">언어 <select id="pref-lang" name="lang"><option value="">상관없음</option>{% for code, label in languages %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
-    <fieldset class="pref-interests"><legend>관심사 <small>최대 3개 · 같은 관심사인 상대를 먼저 찾고, {{ relax_seconds }}초가 지나면 누구와도 연결해요</small></legend>
+  <div class="intro"><div><span class="eyebrow">MEET SOMEONE NEW</span><h1>{% translate "오늘의 새로운 연결." %}</h1><p>{% translate "카메라를 확인하고, 가볍게 인사를 건네보세요." %}</p></div><span class="pill" id="connection-badge" aria-hidden="true">{% translate "시작할 준비가 됐어요" %}</span><p class="sr-only" id="live-status" role="status" aria-live="polite"></p></div>
+  <form class="preferences" id="preferences" aria-label="{% translate "매칭 선호" %}">
+    <label class="pref-language">{% translate "언어" %} <select id="pref-lang" name="lang"><option value="">{% translate "상관없음" %}</option>{% for code, label in languages %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
+    <fieldset class="pref-interests"><legend>{% translate "관심사" %} <small>{% blocktranslate %}최대 3개 · 같은 관심사인 상대를 먼저 찾고, {{ relax_seconds }}초가 지나면 누구와도 연결해요{% endblocktranslate %}</small></legend>
       {% for code, label in interests %}<label class="chip"><input type="checkbox" name="interests" value="{{ code }}"><span>{{ label }}</span></label>{% endfor %}
     </fieldset>
+    <label class="pref-veil"><input type="checkbox" id="pref-veil" checked> {% translate "연결 직후 상대 영상 흐리게" %}</label>
   </form>
-  <section class="workspace" aria-label="화상 대화">
+  <section class="workspace" aria-label="{% translate "화상 대화" %}">
     <div class="call-area">
       <div class="video-grid">
         <article class="video-card remote-card">
           <video id="remoteVideo" autoplay playsinline></video>
-          <div class="empty-state" id="remote-empty"><div class="orbit">◈</div><h2 id="status">누구와 이야기하게 될까요?</h2><p id="status-detail">대화 시작을 누르면 카메라와 마이크를 확인합니다.</p></div>
-          <div class="video-label"><span class="dot"></span><span id="peer-label">새로운 친구</span></div>
+          <button type="button" class="reveal" id="reveal" hidden>{% translate "영상 보기" %}<small>{% translate "상대 영상이 흐리게 가려져 있어요" %}</small></button>
+          <div class="empty-state" id="remote-empty"><div class="orbit">◈</div><h2 id="status">{% translate "누구와 이야기하게 될까요?" %}</h2><p id="status-detail">{% translate "대화 시작을 누르면 카메라와 마이크를 확인합니다." %}</p></div>
+          <div class="video-label"><span class="dot"></span><span id="peer-label">{% translate "새로운 친구" %}</span></div>
         </article>
         <article class="video-card local-card">
           <video id="localVideo" autoplay playsinline muted></video>
-          <div class="empty-state" id="local-empty"><span class="camera-symbol">◎</span><p>내 카메라 미리보기</p></div>
-          <div class="video-label"><span class="dot green"></span>나 <span id="local-media-label"></span></div>
-          <span class="private-label">미리보기</span>
+          <div class="empty-state" id="local-empty"><span class="camera-symbol">◎</span><p>{% translate "내 카메라 미리보기" %}</p></div>
+          <div class="video-label"><span class="dot green"></span>{% translate "나" %} <span id="local-media-label"></span></div>
+          <span class="private-label">{% translate "미리보기" %}</span>
         </article>
       </div>
       <div class="controls">
-        <div class="media-controls"><button id="toggle-camera" class="secondary" disabled>카메라 끄기</button><button id="toggle-mute" class="secondary" disabled>마이크 끄기</button></div>
-        <div class="session-controls"><button id="report" class="secondary danger" disabled>신고</button><button id="stop" class="secondary danger" disabled>종료</button><button id="start" class="primary">대화 시작 <span>↗</span></button><button id="next" class="primary" hidden>다음 상대 →</button></div>
+        <div class="media-controls"><button id="toggle-camera" class="secondary" disabled>{% translate "카메라 끄기" %}</button><button id="toggle-mute" class="secondary" disabled>{% translate "마이크 끄기" %}</button></div>
+        <div class="session-controls"><button id="report" class="secondary danger" disabled>{% translate "신고" %}</button><button id="stop" class="secondary danger" disabled>{% translate "종료" %}</button><button id="start" class="primary">{% translate "대화 시작" %} <span>↗</span></button><button id="next" class="primary" hidden>{% translate "다음 상대" %} →</button></div>
       </div>
       <p class="notice" id="notice" role="alert"></p>
-      <div class="conversation-tip"><span>✦</span><div><strong>첫마디가 어렵다면</strong><p>“오늘 하루 중 가장 좋았던 순간은 언제인가요?”</p></div><span class="tip-index">01 / HELLO</span></div>
+      <div class="conversation-tip"><span>✦</span><div><strong>{% translate "첫마디가 어렵다면" %}</strong><p>{% translate "“오늘 하루 중 가장 좋았던 순간은 언제인가요?”" %}</p></div><span class="tip-index">01 / HELLO</span></div>
     </div>
-    <aside class="chat-panel"><div class="chat-heading"><h2>메시지</h2><span>실시간 대화</span></div><div id="messages" role="log" aria-label="대화 메시지" aria-live="polite"><p class="chat-empty">연결되면 메시지를 보낼 수 있어요.<br>짧은 인사로 대화를 시작해 보세요.</p></div><form id="message-form"><label class="sr-only" for="message">메시지</label><input id="message" maxlength="2000" placeholder="메시지를 입력하세요…" autocomplete="off" disabled><button id="send-button" type="submit" aria-label="메시지 전송" disabled>↑</button></form><p class="chat-footnote">대화는 저장하지 않아요 · 신고 시에만 최근 메시지 보관</p></aside>
+    <aside class="chat-panel"><div class="chat-heading"><h2>{% translate "메시지" %}</h2><span>{% translate "실시간 대화" %}</span></div><div id="messages" role="log" aria-label="{% translate "대화 메시지" %}" aria-live="polite"><p class="chat-empty">{% translate "연결되면 메시지를 보낼 수 있어요." %}<br>{% translate "짧은 인사로 대화를 시작해 보세요." %}</p></div><form id="message-form"><label class="sr-only" for="message">{% translate "메시지" %}</label><input id="message" maxlength="2000" placeholder="{% translate "메시지를 입력하세요…" %}" autocomplete="off" disabled><button id="send-button" type="submit" aria-label="{% translate "메시지 전송" %}" disabled>↑</button></form><p class="chat-footnote">{% translate "대화는 저장하지 않아요 · 신고 시에만 최근 메시지 보관" %}</p></aside>
   </section>
   <dialog id="report-dialog" aria-labelledby="report-title">
     <form method="dialog" id="report-form">
-      <h2 id="report-title">이 상대를 신고할까요?</h2>
-      <p>신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다. 검토를 위해 이번 대화의 최근 메시지(최대 20개)가 신고와 함께 저장되고 {{ retention_days }}일 뒤 삭제됩니다.</p>
-      <fieldset><legend class="sr-only">신고 사유</legend>
-        <label><input type="radio" name="reason" value="nudity" required> 부적절한 노출</label>
-        <label><input type="radio" name="reason" value="harassment"> 욕설·괴롭힘</label>
-        <label><input type="radio" name="reason" value="spam"> 스팸·광고</label>
-        <label><input type="radio" name="reason" value="other"> 기타</label>
+      <h2 id="report-title">{% translate "이 상대를 신고할까요?" %}</h2>
+      <p>{% blocktranslate %}신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다. 검토를 위해 이번 대화의 최근 메시지(최대 20개)가 신고와 함께 저장되고 {{ retention_days }}일 뒤 삭제됩니다.{% endblocktranslate %}</p>
+      <fieldset><legend class="sr-only">{% translate "신고 사유" %}</legend>
+        <label><input type="radio" name="reason" value="nudity" required> {% translate "부적절한 노출" %}</label>
+        <label><input type="radio" name="reason" value="harassment"> {% translate "욕설·괴롭힘" %}</label>
+        <label><input type="radio" name="reason" value="spam"> {% translate "스팸·광고" %}</label>
+        <label><input type="radio" name="reason" value="other"> {% translate "기타" %}</label>
       </fieldset>
-      <div class="dialog-actions"><button type="button" class="secondary" id="report-cancel">취소</button><button class="primary danger-fill" value="submit">신고하기</button></div>
+      <div class="dialog-actions"><button type="button" class="secondary" id="report-cancel">{% translate "취소" %}</button><button class="primary danger-fill" value="submit">{% translate "신고하기" %}</button></div>
     </form>
   </dialog>
-  <footer><span>좋은 대화는 서로를 존중하는 마음에서 시작됩니다.</span><span>개인정보를 공유하지 마세요 · 불편한 대화는 종료하세요</span></footer>
+  <dialog id="consent-dialog" aria-labelledby="consent-title">
+    <form method="dialog" id="consent-form">
+      <h2 id="consent-title">{% translate "시작하기 전에 확인해 주세요" %}</h2>
+      <p>{% translate "처음 만난 사람과 영상으로 대화하는 서비스입니다." %}</p>
+      <fieldset><legend class="sr-only">{% translate "이용 동의" %}</legend>
+        <label><input type="checkbox" name="adult" value="1" required> {% blocktranslate %}만 {{ min_age }}세 이상입니다{% endblocktranslate %}</label>
+        <label><input type="checkbox" name="rules" value="1" required> <span>{% blocktranslate %}<a href="{{ safety_url }}" target="_blank">안전 수칙</a>과 <a href="{{ terms_url }}" target="_blank">이용약관</a>을 지키고, <a href="{{ privacy_url }}" target="_blank">개인정보 처리방침</a>을 확인했습니다{% endblocktranslate %}</span></label>
+      </fieldset>
+      <p class="consent-verify" id="consent-verify" hidden>{% translate "이 서비스는 본인인증으로 성인 여부를 확인합니다." %} <a href="{{ trust.verify_url }}">{% translate "본인인증 하기" %}</a></p>
+      <p class="notice" id="consent-error" role="alert"></p>
+      {% csrf_token %}
+      <div class="dialog-actions"><button type="button" class="secondary" id="consent-cancel">{% translate "취소" %}</button><button class="primary" value="submit">{% translate "동의하고 시작" %}</button></div>
+    </form>
+  </dialog>
+  <footer><span>{% blocktranslate %}좋은 대화는 서로를 존중하는 마음에서 시작됩니다. · 만 {{ min_age }}세 이상 이용{% endblocktranslate %}</span><span><a href="{{ safety_url }}">{% translate "안전 수칙" %}</a> · <a href="{{ terms_url }}">{% translate "이용약관" %}</a> · <a href="{{ privacy_url }}">{% translate "개인정보 처리방침" %}</a></span></footer>
 </main>
 {{ rtc_config|json_script:"rtc-config" }}
+{{ trust|json_script:"trust" }}
+<script src="{% url 'javascript-catalog' %}"></script>
 <script type="module" src="{% static 'js/script.js' %}"></script>
 </body></html>

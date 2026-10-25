@@ -47,6 +47,77 @@
 .account-page a:hover {
   color: #7660dc;
 }
+.account-page.legal {
+  max-width: 760px;
+}
+.account-page h2 {
+  font-size: 16px;
+  margin-top: 28px;
+}
+.account-page li {
+  font-size: 13px;
+  color: #4f5668;
+  line-height: 1.8;
+}
+.account-page table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.account-page th,
+.account-page td {
+  border-top: 1px solid #e9eaf1;
+  padding: 9px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+.account-page textarea {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #d9dce6;
+  border-radius: 7px;
+  font: inherit;
+}
+.account-page .form-success {
+  color: #2f7a5c;
+  background: #eaf7f1;
+  border-radius: 7px;
+  padding: 10px 12px;
+}
+.danger-zone {
+  margin-top: 30px;
+  border-top: 1px solid #f0e3e6;
+  padding-top: 14px;
+  font-size: 13px;
+}
+.danger-zone summary {
+  cursor: pointer;
+  color: #b14e61;
+}
+.legal-links {
+  margin-top: 30px;
+  font-size: 11px;
+  color: #8b91a2;
+}
+@media (max-width: 520px) {
+  .account-page table,
+  .account-page tbody,
+  .account-page tr,
+  .account-page td {
+    display: block;
+  }
+  .account-page thead {
+    display: none;
+  }
+  .account-page td {
+    border: 0;
+    padding: 3px 0;
+  }
+  .account-page tr {
+    border-top: 1px solid #e9eaf1;
+    padding: 8px 0;
+  }
+}
 @media (max-width: 520px) {
   .account-page {
     margin: 20px;

@@ -1,4 +1,5 @@
 const { chromium } = require("playwright");
+const { begin } = require("./helpers.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
@@ -33,11 +34,11 @@ const assert = require("node:assert/strict");
       ),
     );
     const startPair = async () => {
-      await a.getByRole("button", { name: "대화 시작" }).click();
+      await begin(a);
       await a.waitForFunction(() =>
         document.querySelector("#status").textContent.includes("찾고"),
       );
-      await b.getByRole("button", { name: "대화 시작" }).click();
+      await begin(b);
     };
     const stopPair = () =>
       Promise.all(

@@ -1,0 +1,220 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "<a href=\"%(safety_url)s\" target=\"_blank\">안전 수칙</a>과 <a href=\"%(terms_url)s\" target=\"_blank\">이용약관</a>을 지키고, <a href=\"%(privacy_url)s\" target=\"_blank\">개인정보 처리방침</a>을 확인했습니다"
+msgstr "I will follow the <a href=\"%(safety_url)s\" target=\"_blank\">safety rules</a> and <a href=\"%(terms_url)s\" target=\"_blank\">terms</a>, and I have read the <a href=\"%(privacy_url)s\" target=\"_blank\">privacy policy</a>"
+
+msgid "“오늘 하루 중 가장 좋았던 순간은 언제인가요?”"
+msgstr "“What was the best moment of your day?”"
+
+msgid "개인정보 처리방침"
+msgstr "Privacy policy"
+
+msgid "게임"
+msgstr "Games"
+
+msgid "공부"
+msgstr "Study"
+
+msgid "관심사"
+msgstr "Interests"
+
+msgid "기타"
+msgstr "Other"
+
+msgid "나"
+msgstr "Me"
+
+msgid "내 카메라 미리보기"
+msgstr "My camera preview"
+
+msgid "누구와 이야기하게 될까요?"
+msgstr "Who will you talk to?"
+
+msgid "다음 상대"
+msgstr "Next"
+
+msgid "대화 메시지"
+msgstr "Chat messages"
+
+msgid "대화 시작"
+msgstr "Start chatting"
+
+msgid "대화 시작을 누르면 카메라와 마이크를 확인합니다."
+msgstr "Press Start to check your camera and microphone."
+
+msgid "대화는 저장하지 않아요 · 신고 시에만 최근 메시지 보관"
+msgstr "Chats are not stored · recent messages are kept only with a report"
+
+msgid "동의하고 시작"
+msgstr "Agree and start"
+
+msgid "로그인"
+msgstr "Log in"
+
+msgid "마이크 끄기"
+msgstr "Mute"
+
+msgid "만 %(min_age)s세 이상입니다"
+msgstr "I am %(min_age)s or older"
+
+msgid "매칭 선호"
+msgstr "Matching preferences"
+
+msgid "메시지"
+msgstr "Messages"
+
+msgid "메시지 전송"
+msgstr "Send message"
+
+msgid "메시지를 입력하세요…"
+msgstr "Type a message…"
+
+msgid "미리보기"
+msgstr "Preview"
+
+msgid "반려동물"
+msgstr "Pets"
+
+msgid "변경"
+msgstr "Change"
+
+msgid "본인인증 하기"
+msgstr "Verify my identity"
+
+msgid "부적절한 노출"
+msgstr "Nudity or sexual content"
+
+msgid "상관없음"
+msgstr "Any"
+
+msgid "상대 영상이 흐리게 가려져 있어요"
+msgstr "Your partner's video is blurred"
+
+msgid "새로운 대화의 시작"
+msgstr "Meet someone new"
+
+msgid "새로운 친구"
+msgstr "New friend"
+
+msgid "서로 다른 일상, 하나의 대화"
+msgstr "Different days, one conversation"
+
+msgid "스팸·광고"
+msgstr "Spam or advertising"
+
+msgid "시작하기 전에 확인해 주세요"
+msgstr "Before you start"
+
+msgid "시작할 준비가 됐어요"
+msgstr "Ready to start"
+
+msgid "신고"
+msgstr "Report"
+
+msgid "신고 사유"
+msgstr "Reason for report"
+
+msgid "신고가 너무 많습니다. 잠시 후 다시 시도해 주세요."
+msgstr "Too many reports. Please try again later."
+
+msgid "신고하기"
+msgstr "Report"
+
+msgid "신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다. 검토를 위해 이번 대화의 최근 메시지(최대 20개)가 신고와 함께 저장되고 %(retention_days)s일 뒤 삭제됩니다."
+msgstr "Reporting ends the chat and you will not be matched with this person again. For review, the latest messages of this chat (up to 20) are stored with the report and deleted after %(retention_days)s days."
+
+msgid "실시간 대화"
+msgstr "Live chat"
+
+msgid "안전 수칙"
+msgstr "Safety rules"
+
+msgid "언어"
+msgstr "Language"
+
+msgid "여행"
+msgstr "Travel"
+
+msgid "연결 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요."
+msgstr "The matching server has a problem. Please try again shortly."
+
+msgid "연결 직후 상대 영상 흐리게"
+msgstr "Blur partner video when connected"
+
+msgid "연결되면 메시지를 보낼 수 있어요."
+msgstr "You can send messages once connected."
+
+msgid "영상 보기"
+msgstr "Show video"
+
+msgid "영화"
+msgstr "Movies"
+
+msgid "오늘의 새로운 연결."
+msgstr "Today's new connection."
+
+msgid "올바르지 않은 요청입니다."
+msgstr "Invalid request."
+
+msgid "욕설·괴롭힘"
+msgstr "Abuse or harassment"
+
+msgid "운동"
+msgstr "Sports"
+
+msgid "음식"
+msgstr "Food"
+
+msgid "음악"
+msgstr "Music"
+
+msgid "이 상대를 신고할까요?"
+msgstr "Report this person?"
+
+msgid "이 서비스는 본인인증으로 성인 여부를 확인합니다."
+msgstr "This service checks that you are an adult through identity verification."
+
+msgid "이용 동의"
+msgstr "Consent"
+
+msgid "이용약관"
+msgstr "Terms"
+
+msgid "잠시 후 다시 시도해 주세요."
+msgstr "Please try again in a moment."
+
+msgid "종료"
+msgstr "End"
+
+msgid "좋은 대화는 서로를 존중하는 마음에서 시작됩니다. · 만 %(min_age)s세 이상 이용"
+msgstr "Good conversations start with respect. · Ages %(min_age)s and over"
+
+msgid "짧은 인사로 대화를 시작해 보세요."
+msgstr "Start with a short hello."
+
+msgid "처음 만난 사람과 영상으로 대화하는 서비스입니다."
+msgstr "This service connects you by video with people you have never met."
+
+msgid "첫마디가 어렵다면"
+msgstr "Not sure how to start?"
+
+msgid "최대 3개 · 같은 관심사인 상대를 먼저 찾고, %(relax_seconds)s초가 지나면 누구와도 연결해요"
+msgstr "Up to 3 · we look for shared interests first, then anyone after %(relax_seconds)s seconds"
+
+msgid "취소"
+msgstr "Cancel"
+
+msgid "카메라 끄기"
+msgstr "Camera off"
+
+msgid "카메라를 확인하고, 가볍게 인사를 건네보세요."
+msgstr "Check your camera and say hello."
+
+msgid "화면 언어"
+msgstr "Display language"
+
+msgid "화상 대화"
+msgstr "Video chat"

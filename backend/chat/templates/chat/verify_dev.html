@@ -1,0 +1,12 @@
+{% extends 'main/base_page.html' %}
+{% block title %}본인인증 (개발용){% endblock %}
+{% block content %}
+<h1>본인인증</h1>
+<p class="form-error" role="note">개발용 화면입니다. 실제 서비스에서는 휴대폰 본인인증(PASS 등) 화면으로 바뀝니다. 입력한 이름과 생년월일은 저장하지 않고, 성인 여부와 해시한 식별값만 남습니다.</p>
+<form method="post" action="{% url 'chat:verify_callback' %}">{% csrf_token %}
+  <p><label for="name">이름</label><input id="name" name="name" required autocomplete="off"></p>
+  <p><label for="birth_date">생년월일</label><input id="birth_date" name="birth_date" type="date" required></p>
+  <button class="primary" type="submit">인증하기</button>
+</form>
+<p>만 {{ min_age }}세 이상만 이용할 수 있습니다.</p>
+{% endblock %}

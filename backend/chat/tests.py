@@ -1,22 +1,29 @@
 import asyncio
 import base64
 import os
+import re
+import sys
+from pathlib import Path
 import hashlib
 import hmac
+from datetime import date, timedelta
 from unittest.mock import patch
 from uuid import uuid4
+from asgiref.sync import async_to_sync
+from channels.db import database_sync_to_async
 from django.conf import settings
+from django.utils import timezone
 from django.contrib.auth.models import User
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from channels.testing import WebsocketCommunicator
 from channels.auth import AuthMiddlewareStack
 from channels.routing import URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
-from . import limits
+from . import limits, sanctions
 from .consumers import ChatConsumer
 from .routing import websocket_urlpatterns
 from .matchmaking import Matchmaker
-from .models import Report
+from .models import Appeal, Report, Sanction
 from .testing import isolated_prefix
 
 
@@ -175,7 +182,8 @@ class MatchmakingTests(SimpleTestCase):
         await self.async_case(run)
 
 
-@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}})
+# These classes exercise matching itself; the consent gate has its own tests (TrustTests).
+@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}, CONSENT_REQUIRED=False)
 class SignalingTests(SimpleTestCase):
     async def test_missing_presence_requires_reconnect(self):
         app = AuthMiddlewareStack(URLRouter(websocket_urlpatterns))
@@ -257,13 +265,15 @@ class SignalingTests(SimpleTestCase):
         self.assertEqual(self.client.get('/chat/12/').status_code, 200)
 
 
-def communicator(ip):
-    client = WebsocketCommunicator(AuthMiddlewareStack(URLRouter(websocket_urlpatterns)), '/ws/chat/')
+def communicator(ip, session_key=None, language=None):
+    cookies = [f'sessionid={session_key}'] * bool(session_key) + [f'django_language={language}'] * bool(language)
+    headers = [(b'cookie', '; '.join(cookies).encode())] if cookies else []
+    client = WebsocketCommunicator(AuthMiddlewareStack(URLRouter(websocket_urlpatterns)), '/ws/chat/', headers=headers)
     client.scope['client'] = [ip, 50000]
     return client
 
 
-@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}})
+@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}, CONSENT_REQUIRED=False)
 class ModerationTests(TransactionTestCase):
     def setUp(self):
         isolated_prefix(self)
@@ -660,3 +670,233 @@ class HttpLimitTests(TestCase):
         self.assertContains(response, 'videochat_matches_total 3')
         self.assertContains(response, '# TYPE videochat_match_wait_seconds histogram')
         self.assertContains(response, 'videochat_queue_waiting 0')
+
+
+def session_after(client, *posts):
+    for url, data in posts:
+        client.post(url, data)
+    return client.session.session_key
+
+
+def queued_identity():
+    redis = limits.sync_redis()
+    channel = redis.zrange(settings.MATCHMAKING_PREFIX + 'queue', 0, 0)[0]
+    return redis.hget(settings.MATCHMAKING_PREFIX + 'member:' + channel, 'who')
+
+
+ADULT = {'name': 'Kim', 'birth_date': '1990-05-01'}
+MINOR = {'name': 'Lee', 'birth_date': f'{date.today().year - 15}-01-01'}
+
+
+@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}},
+                   CONSENT_REQUIRED=True)
+class TrustTests(TransactionTestCase):
+    def setUp(self):
+        isolated_prefix(self)
+
+    async def join(self, session_key=None):
+        client = communicator('10.0.20.1', session_key)
+        await client.connect()
+        await client.receive_json_from()
+        await client.send_json_to({'type': 'join'})
+        reply = await client.receive_json_from()
+        await client.disconnect()
+        return reply['type']
+
+    def test_consent_needs_both_statements(self):
+        self.assertEqual(self.client.post('/chat/consent/', {'adult': '1'}).status_code, 400)
+        self.assertEqual(self.client.post('/chat/consent/', {'adult': '1', 'rules': '1'}).status_code, 200)
+        self.assertContains(self.client.get('/chat/'), '"consented": true')
+
+    def test_server_refuses_matching_without_consent(self):
+        self.assertEqual(async_to_sync(self.join)(), 'consent_required')
+        key = session_after(self.client, ('/chat/consent/', {'adult': '1', 'rules': '1'}))
+        self.assertEqual(async_to_sync(self.join)(key), 'waiting')
+
+    def test_terms_change_requires_consent_again(self):
+        key = session_after(self.client, ('/chat/consent/', {'adult': '1', 'rules': '1'}))
+        with override_settings(CONSENT_VERSION='next-version'):
+            self.assertEqual(async_to_sync(self.join)(key), 'consent_required')
+
+    @override_settings(REQUIRE_VERIFIED_ADULT=True, IDENTITY_VERIFIER='chat.verification.DevVerifier')
+    def test_verified_adult_required_and_becomes_the_ban_identity(self):
+        key = session_after(self.client, ('/chat/consent/', {'adult': '1', 'rules': '1'}))
+        self.assertEqual(async_to_sync(self.join)(key), 'verification_required')
+        self.assertRedirects(self.client.post('/chat/verify/callback/', ADULT), '/chat/', fetch_redirect_response=False)
+        async def join_and_inspect():
+            client = communicator('10.0.20.1', key)
+            await client.connect()
+            await client.receive_json_from()
+            await client.send_json_to({'type': 'join'})
+            reply = (await client.receive_json_from())['type']
+            who = await database_sync_to_async(queued_identity)()
+            await client.disconnect()
+            return reply, who
+        reply, who = async_to_sync(join_and_inspect)()
+        self.assertEqual(reply, 'waiting')
+        self.assertTrue(who.startswith('v'))  # not the IP: survives a new network or account
+
+    @override_settings(REQUIRE_VERIFIED_ADULT=True, IDENTITY_VERIFIER='chat.verification.DevVerifier')
+    def test_minor_is_refused(self):
+        key = session_after(self.client, ('/chat/consent/', {'adult': '1', 'rules': '1'}))
+        self.assertContains(self.client.post('/chat/verify/callback/', MINOR), '이용할 수 없어요')
+        self.assertEqual(async_to_sync(self.join)(key), 'verification_required')
+        self.assertContains(self.client.get('/chat/'), '"minor": true')
+
+    @override_settings(IDENTITY_VERIFIER='chat.verification.DevVerifier')
+    def test_verify_next_cannot_redirect_off_site(self):
+        self.client.get('/chat/verify/?next=https://evil.example/')
+        self.assertRedirects(self.client.post('/chat/verify/callback/', ADULT), '/chat/', fetch_redirect_response=False)
+
+    @override_settings(IDENTITY_VERIFIER='')
+    def test_verification_is_off_without_a_provider(self):
+        self.assertEqual(self.client.get('/chat/verify/').status_code, 404)
+
+
+@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}},
+                   CONSENT_REQUIRED=False, REPORT_BAN_THRESHOLD=1)
+class SanctionTests(TransactionTestCase):
+    def setUp(self):
+        isolated_prefix(self)
+        self.admin = User.objects.create_superuser('mod', password='mod-password-123!')
+
+    def ban_ttl(self, identity):
+        return limits.sync_redis().ttl(sanctions.ban_key(identity))
+
+    def auto_ban(self):
+        """a reports b once (threshold 1): b is auto-banned; returns b's next 'banned' message."""
+        async def run():
+            a, b = communicator('10.0.30.1'), communicator('10.0.30.2')
+            for client in (a, b):
+                await client.connect()
+                await client.receive_json_from()
+            await a.send_json_to({'type': 'join'})
+            await a.receive_json_from()
+            await b.send_json_to({'type': 'join'})
+            match = (await a.receive_json_from())['match_id']
+            await b.receive_json_from()
+            await a.send_json_to({'type': 'report', 'match_id': match, 'reason': 'nudity'})
+            await a.receive_json_from()
+            await b.receive_json_from()  # peer_left
+            await asyncio.sleep(1)
+            await b.send_json_to({'type': 'join'})
+            banned = await b.receive_json_from()
+            for client in (a, b):
+                await client.disconnect()
+            return banned
+        return async_to_sync(run)()
+
+    def test_auto_ban_is_recorded_and_can_be_appealed_once(self):
+        banned = self.auto_ban()
+        self.assertEqual(banned['type'], 'banned')
+        sanction = Sanction.objects.get()
+        self.assertEqual(sanction.source, Sanction.Source.AUTO)
+        self.assertTrue(sanction.active)
+        url = f"/chat/appeal/{banned['appeal']}/"
+        self.assertContains(self.client.get(url), '이의 제기')
+        self.assertEqual(self.client.post(url, {'message': '짧음'}).status_code, 400)
+        self.assertContains(self.client.post(url, {'message': '카메라 각도 때문에 오해가 있었습니다.'}), '접수됐어요')
+        self.client.post(url, {'message': '두 번째 이의 제기를 보내 봅니다.'})
+        self.assertEqual(Appeal.objects.count(), 1)
+        self.assertEqual(self.client.get('/chat/appeal/not-a-code/').status_code, 404)
+
+    def test_dismissing_the_report_lifts_the_auto_ban(self):
+        self.auto_ban()
+        report, sanction = Report.objects.get(), Sanction.objects.get()
+        self.assertGreater(self.ban_ttl(sanction.identity), 0)
+        self.client.force_login(self.admin)
+        self.client.post('/admin/chat/report/', {'action': 'dismiss', '_selected_action': [report.pk]})
+        report.refresh_from_db()
+        sanction.refresh_from_db()
+        self.assertEqual((report.status, report.reviewed_by), (Report.Status.DISMISSED, self.admin))
+        self.assertIsNotNone(sanction.lifted_at)
+        self.assertEqual(self.ban_ttl(sanction.identity), -2)  # no ban key left
+
+    def test_upholding_a_report_extends_the_ban(self):
+        self.auto_ban()
+        report = Report.objects.get()
+        self.client.force_login(self.admin)
+        self.client.post('/admin/chat/report/', {'action': 'uphold', '_selected_action': [report.pk]})
+        self.assertGreater(self.ban_ttl(report.reported), settings.SANCTION_DAYS * 86400 - 60)
+        self.assertEqual(Sanction.objects.filter(source=Sanction.Source.MODERATOR).count(), 1)
+
+    def test_accepting_an_appeal_lifts_the_sanction(self):
+        banned = self.auto_ban()
+        self.client.post(f"/chat/appeal/{banned['appeal']}/", {'message': '오해가 있었습니다. 확인 부탁드립니다.'})
+        self.client.force_login(self.admin)
+        appeal = Appeal.objects.get()
+        self.client.post('/admin/chat/appeal/', {'action': 'accept', '_selected_action': [appeal.pk]})
+        appeal.refresh_from_db()
+        self.assertEqual(appeal.status, Appeal.Status.ACCEPTED)
+        self.assertEqual(self.ban_ttl(appeal.sanction.identity), -2)
+
+    def test_lifting_one_sanction_keeps_a_longer_one(self):
+        sanctions.impose('ipX', timedelta(days=7), Sanction.Source.MODERATOR)
+        short = sanctions.impose('ipX', timedelta(hours=1), Sanction.Source.AUTO)
+        sanctions.lift(short)
+        self.assertGreater(self.ban_ttl('ipX'), 6 * 86400)
+
+
+HANGUL = re.compile('[가-힣]')
+
+
+@override_settings(CHANNEL_LAYERS={'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}},
+                   CONSENT_REQUIRED=False)
+class I18nTests(TransactionTestCase):
+    def setUp(self):
+        isolated_prefix(self)
+
+    def test_every_ui_string_has_an_english_translation(self):
+        sys.path.insert(0, str(Path(settings.BASE_DIR).parent / 'scripts'))
+        import messages
+        self.assertEqual(messages.missing(), [])
+
+    def test_english_lobby_has_no_korean_left(self):
+        self.client.cookies['django_language'] = 'en'
+        html = self.client.get('/chat/').content.decode()
+        text = re.sub(r'<script.*?</script>|<[^>]+>', ' ', html, flags=re.S).replace('한국어', '')
+        self.assertEqual(HANGUL.findall(text), [])
+        self.assertIn('Start chatting', html)
+        self.assertIn('lang="en"', html)
+        self.assertIn('Looking for someone to talk to', self.client.get('/jsi18n/').content.decode())
+
+    def test_korean_stays_default_whatever_the_browser_asks(self):
+        self.assertContains(self.client.get('/chat/', HTTP_ACCEPT_LANGUAGE='en-US,en;q=0.9'), '대화 시작')
+
+    def test_language_switch_sets_the_cookie(self):
+        self.client.post('/i18n/setlang/', {'language': 'en', 'next': '/chat/'})
+        self.assertContains(self.client.get('/chat/'), 'Start chatting')
+
+    async def test_server_errors_follow_the_chosen_language(self):
+        client = communicator('10.0.40.1', language='en')
+        await client.connect()
+        await client.receive_json_from()
+        await client.send_to(text_data='not-json')
+        self.assertEqual((await client.receive_json_from())['message'], 'Invalid request.')
+        await client.disconnect()
+
+
+class PolicyAndAccountTests(TestCase):
+    def setUp(self):
+        isolated_prefix(self)
+
+    def test_policy_pages_state_the_real_retention(self):
+        for url in ('/terms/', '/privacy/', '/safety/'):
+            self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertContains(self.client.get('/privacy/'), f'{settings.REPORT_RETENTION_DAYS}일')
+        self.assertContains(self.client.get('/chat/'), 'href="/privacy/"')
+
+    def test_account_self_deletion_needs_the_password(self):
+        User.objects.create_user('leaver', password='leaver-password-123!')
+        self.client.post('/login/', {'username': 'leaver', 'password': 'leaver-password-123!'})
+        self.assertEqual(self.client.post('/home/delete/', {'password': 'wrong'}).status_code, 400)
+        self.assertContains(self.client.post('/home/delete/', {'password': 'leaver-password-123!'}), '삭제했어요')
+        self.assertFalse(User.objects.filter(username='leaver').exists())
+
+    def test_purge_also_expires_old_sanctions(self):
+        from django.core.management import call_command
+        old = sanctions.impose('ipOld', timedelta(hours=1), Sanction.Source.AUTO)
+        Sanction.objects.filter(pk=old.pk).update(ends_at=timezone.now() - timedelta(days=91))
+        sanctions.impose('ipNew', timedelta(hours=1), Sanction.Source.AUTO)
+        call_command('purge_reports', stdout=open(os.devnull, 'w'))
+        self.assertEqual(list(Sanction.objects.values_list('identity', flat=True)), ['ipNew'])

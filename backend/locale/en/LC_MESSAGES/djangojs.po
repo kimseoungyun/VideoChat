@@ -1,0 +1,193 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid " · 음소거"
+msgstr " · muted"
+
+msgid " · 카메라 꺼짐"
+msgstr " · camera off"
+
+msgid "%s초 동안 다시 연결되기를 기다립니다."
+msgstr "Waiting %s seconds for them to come back."
+
+msgid "같은 네트워크에서 연결 요청이 많습니다. 잠시 후 다음 상대를 눌러 주세요."
+msgstr "Too many connection requests from your network. Press Next again shortly."
+
+msgid "같은 네트워크에서 연결이 너무 많습니다. 다른 탭을 닫고 잠시 후 다시 시도해 주세요."
+msgstr "Too many connections from your network. Close other tabs and try again shortly."
+
+msgid "공통 관심사: "
+msgstr "Shared interests: "
+
+msgid "관심사는 3개까지 고를 수 있어요."
+msgstr "You can pick up to 3 interests."
+
+msgid "나: "
+msgstr "Me: "
+
+msgid "네트워크 연결을 확인하고 있습니다."
+msgstr "Checking the network connection."
+
+msgid "다른 앱에서 장치를 사용 중일 수 있습니다. 장치를 확인해 주세요."
+msgstr "Another app may be using your devices. Please check them."
+
+msgid "다음 상대를 눌러 다시 시도해 주세요."
+msgstr "Press Next to try again."
+
+msgid "다음 상대를 눌러 다시 연결해 주세요."
+msgstr "Press Next to connect again."
+
+msgid "다음 상대를 눌러 새로운 대화를 시작하세요."
+msgstr "Press Next to start a new chat."
+
+msgid "대화 상대를 찾고 있어요"
+msgstr "Looking for someone to talk to"
+
+msgid "대화 시작을 누르면 상대를 찾아드립니다."
+msgstr "Press Start and we'll find someone for you."
+
+msgid "대화가 연결됐어요"
+msgstr "You're connected"
+
+msgid "대화를 유지한 채 서버에 다시 연결하고 있습니다."
+msgstr "Reconnecting to the server without ending your chat."
+
+msgid "동의를 저장하지 못했어요. 잠시 후 다시 시도해 주세요."
+msgstr "Couldn't save your consent. Please try again shortly."
+
+msgid "마이크 끄기"
+msgstr "Mute"
+
+msgid "마이크 켜기"
+msgstr "Unmute"
+
+msgid "만 %s세 미만은 이용할 수 없어요."
+msgstr "You must be %s or older to use this service."
+
+msgid "미디어 연결에 실패했습니다. 네트워크를 확인해 주세요."
+msgstr "The media connection failed. Please check your network."
+
+msgid "브라우저의 접근 권한을 허용해 주세요."
+msgstr "Please allow access in your browser."
+
+msgid "상대가 준비되면 자동으로 연결됩니다."
+msgstr "You'll be connected as soon as someone is ready."
+
+msgid "상대방"
+msgstr "Partner"
+
+msgid "상대방 연결이 잠시 끊겼어요"
+msgstr "Your partner's connection dropped"
+
+msgid "상대방 음성을 재생하려면 화면을 한 번 눌러 주세요."
+msgstr "Tap the screen once to hear your partner."
+
+msgid "상대방이 나갔습니다."
+msgstr "Your partner left."
+
+msgid "상대방이 대화를 종료했어요"
+msgstr "Your partner ended the chat"
+
+msgid "새로운 대화를 시작해 보세요"
+msgstr "Start a new chat"
+
+msgid "새로운 연결을 준비 중"
+msgstr "Setting up a new connection"
+
+msgid "새로운 친구"
+msgstr "New friend"
+
+msgid "새로운 친구 · "
+msgstr "New friend · "
+
+msgid "서버 연결 중"
+msgstr "Connecting to the server"
+
+msgid "서버 연결을 확인하고 있습니다."
+msgstr "Checking the server connection."
+
+msgid "서버에 다시 연결하고 있습니다."
+msgstr "Reconnecting to the server."
+
+msgid "서버에 연결할 수 없습니다. 잠시 후 다시 시작해 주세요."
+msgstr "Can't reach the server. Please start again shortly."
+
+msgid "신고가 누적되어 이용이 일시 제한되었습니다. 약 %s분 후 다시 시도해 주세요."
+msgstr "Matching is temporarily restricted after several reports. Try again in about %s minutes."
+
+msgid "신고가 접수됐어요"
+msgstr "Report received"
+
+msgid "신고가 접수되었습니다."
+msgstr "Your report was received."
+
+msgid "신고를 접수하고 있어요"
+msgstr "Sending your report"
+
+msgid "연결 복구 중"
+msgstr "Reconnecting"
+
+msgid "연결 시간이 초과됐어요"
+msgstr "The connection timed out"
+
+msgid "연결을 완료하지 못했어요"
+msgstr "Couldn't complete the connection"
+
+msgid "연결이 끊긴 사이 대화가 종료됐어요."
+msgstr "The chat ended while you were disconnected."
+
+msgid "연결이 끊어졌어요"
+msgstr "Disconnected"
+
+msgid "영상 연결에 실패했어요"
+msgstr "The video connection failed"
+
+msgid "영상 연결을 다시 맺고 있습니다."
+msgstr "Re-establishing the video connection."
+
+msgid "영상 연결을 복구하지 못했어요"
+msgstr "Couldn't restore the video connection"
+
+msgid "영상과 음성을 연결하고 있습니다."
+msgstr "Connecting video and audio."
+
+msgid "이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요."
+msgstr "You won't be matched with them again. Press Next to continue."
+
+msgid "이의 제기"
+msgstr "Appeal"
+
+msgid "잠시 후 다시 눌러 주세요."
+msgstr "Please press it again in a moment."
+
+msgid "장치를 시작하지 못했습니다. 다른 앱이 카메라를 사용 중인지 확인해 주세요."
+msgstr "Couldn't start your devices. Check whether another app is using the camera."
+
+msgid "지원되는 카메라 해상도를 찾지 못했습니다. 다른 카메라를 연결해 주세요."
+msgstr "No supported camera resolution was found. Please connect another camera."
+
+msgid "카메라 끄기"
+msgstr "Camera off"
+
+msgid "카메라 또는 마이크 연결이 끊어졌습니다. 장치를 확인해 주세요."
+msgstr "Your camera or microphone disconnected. Please check your devices."
+
+msgid "카메라 켜기"
+msgstr "Camera on"
+
+msgid "카메라를 열 수 없습니다. HTTPS 또는 localhost에서 접속해 주세요."
+msgstr "Can't open the camera. Please use HTTPS or localhost."
+
+msgid "카메라를 열 수 없습니다. 장치 연결과 브라우저 권한을 확인해 주세요."
+msgstr "Can't open the camera. Please check your devices and browser permissions."
+
+msgid "카메라와 마이크 권한을 허용한 후 다시 시작해 주세요."
+msgstr "Allow camera and microphone access, then start again."
+
+msgid "카메라와 마이크 확인 중"
+msgstr "Checking camera and microphone"
+
+msgid "카메라와 마이크를 찾을 수 없습니다. 장치 연결을 확인해 주세요."
+msgstr "No camera or microphone found. Please check your devices."

@@ -26,6 +26,12 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python backend/manage.py check && python backend/manage.py makemigrations --check --dry-run
+      - name: Translations compiled from the committed .po files
+        run: |
+          pip install babel==2.17.0
+          python scripts/messages.py missing
+          python scripts/messages.py compile
+          git diff --exit-code backend/locale
       - run: python backend/manage.py test chat main
       - run: python backend/manage.py collectstatic --noinput
       - uses: actions/setup-node@v4

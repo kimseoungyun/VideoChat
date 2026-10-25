@@ -1,0 +1,12 @@
+{% extends 'main/base_page.html' %}
+{% block title %}본인인증 결과{% endblock %}
+{% block content %}
+{% if not ok %}
+<h1>인증을 완료하지 못했어요</h1>
+<p>입력한 정보를 확인한 뒤 <a href="{% url 'chat:verify' %}">다시 시도</a>해 주세요.</p>
+{% else %}
+<h1>이용할 수 없어요</h1>
+<p>VideoChat은 낯선 사람과 영상으로 대화하는 서비스라 만 {{ min_age }}세 이상만 이용할 수 있습니다.</p>
+<p>온라인에서 불편하거나 위험한 일을 겪었다면 청소년상담 1388에 도움을 요청할 수 있어요.</p>
+{% endif %}
+{% endblock %}

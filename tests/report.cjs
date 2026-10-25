@@ -1,4 +1,5 @@
 const { chromium } = require("playwright");
+const { begin } = require("./helpers.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
@@ -38,9 +39,9 @@ const fs = require("node:fs");
         text,
       );
     assert.equal(await a.locator("#report").isDisabled(), true);
-    await a.getByRole("button", { name: "대화 시작" }).click();
+    await begin(a);
     await statusIncludes(a, "찾고");
-    await b.getByRole("button", { name: "대화 시작" }).click();
+    await begin(b);
     for (const p of [a, b])
       await p.waitForFunction(
         () => !document.querySelector("#send-button").disabled,

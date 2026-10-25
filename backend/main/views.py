@@ -49,6 +49,24 @@ def home_view(request):
 
 @require_POST
 @login_required
+def delete_account_view(request):
+    """Self-service deletion, as the privacy policy promises; the password guards stolen sessions."""
+    if not request.user.check_password(request.POST.get('password', '')):
+        return render(request, 'main/home.html', {'delete_error': '비밀번호가 맞지 않습니다.'}, status=400)
+    user = request.user
+    logout(request)
+    user.delete()
+    return render(request, 'main/deleted.html')
+
+
+def policy_view(request, page):
+    return render(request, f'main/{page}.html', {
+        'version': settings.CONSENT_VERSION, 'min_age': settings.MIN_AGE,
+        'retention_days': settings.REPORT_RETENTION_DAYS, 'sanction_days': settings.SANCTION_DAYS})
+
+
+@require_POST
+@login_required
 def logout_view(request):
     logout(request)
     return redirect('starthome')

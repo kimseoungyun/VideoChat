@@ -1,0 +1,24 @@
+{% extends 'main/base_page.html' %}
+{% block title %}이의 제기{% endblock %}
+{% block content %}
+{% if missing %}
+<h1>이의 제기 코드를 찾을 수 없어요</h1>
+<p>코드는 매칭이 제한될 때 표시되며 제한이 끝나고 하루 뒤 만료됩니다.</p>
+{% else %}
+<h1>이용 제한 이의 제기</h1>
+<p>{{ sanction.get_source_display }} · {{ sanction.ends_at|date:"Y-m-d H:i" }}까지{% if not sanction.active %} (종료됨){% endif %}</p>
+{% if submitted %}
+<p class="form-success" role="status">이의 제기가 접수됐어요. 검토자가 확인한 뒤 제한을 유지하거나 해제합니다.</p>
+{% elif pending %}
+<p>이미 검토를 기다리는 이의 제기가 있어요.</p>
+{% else %}
+{% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+<form method="post">{% csrf_token %}
+  <p><label for="message">무슨 일이 있었는지 알려 주세요</label>
+  <textarea id="message" name="message" rows="6" minlength="10" maxlength="1000" required></textarea></p>
+  <button class="primary" type="submit">이의 제기</button>
+</form>
+<p>검토자는 신고 사유와 서버가 중계한 최근 대화를 함께 확인합니다.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

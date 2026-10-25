@@ -7,12 +7,15 @@ import time
 from collections import OrderedDict, deque
 from contextlib import suppress
 from datetime import datetime, timezone
+from importlib import import_module
 from channels.db import database_sync_to_async
 from channels.exceptions import ChannelFull
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
+from django.utils import translation
+from django.utils.translation import gettext, gettext_noop
 from redis.exceptions import RedisError
-from . import limits
+from . import limits, sanctions, trust
 from .matchmaking import Matchmaker
 from .models import Report
 
@@ -41,9 +44,9 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.last_seen = self.updated
         self.last_join = 0
         self.watchdog = None
-        ip = limits.scope_ip(self.scope)
-        self.ip_key = limits.anonymize(ip)
-        self.who = limits.identity(self.scope['user'], ip)
+        self.ip = limits.scope_ip(self.scope)
+        self.ip_key = limits.anonymize(self.ip)
+        self.who = limits.identity(self.scope['user'], self.ip, trust.verified_subject(await self.load_session()))
         # Accept first so the browser receives a close code it can explain to the user.
         await self.accept()
         if await limits.ahit('ws:' + self.ip_key, 60) > settings.WS_CONNECT_RATE:
@@ -54,6 +57,30 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await limits.acount('ws_connections_total')
         await self.send_json({'type': 'ready'})
         self.watchdog = asyncio.create_task(self.watch_presence())
+
+    @database_sync_to_async
+    def load_session(self):
+        """A fresh read: consent or verification may have happened after this socket opened."""
+        session = self.scope.get('session')
+        if session is None or not session.session_key:
+            return {}
+        return import_module(settings.SESSION_ENGINE).SessionStore(session_key=session.session_key).load()
+
+    async def passes_gate(self):
+        session = await self.load_session()
+        missing = trust.gate(session)
+        if missing:
+            await self.send_json({'type': missing, 'min_age': settings.MIN_AGE})
+            return False
+        # Verifying mid-visit upgrades the identity bans attach to.
+        self.who = limits.identity(self.scope['user'], self.ip, trust.verified_subject(session))
+        return True
+
+    async def error(self, text):
+        """User-facing error in the language the visitor picked (cookie set by /i18n/setlang/)."""
+        lang = self.scope.get('cookies', {}).get(settings.LANGUAGE_COOKIE_NAME)
+        with translation.override(lang if lang in dict(settings.LANGUAGES) else settings.LANGUAGE_CODE):
+            await self.send_json({'type': 'error', 'message': gettext(text)})
 
     async def reject(self, reason):
         await limits.acount(f'ws_rejected_total{{reason="{reason}"}}')
@@ -140,10 +167,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 raise ValueError
             await self.handle(data)
         except (ValueError, TypeError, KeyError):
-            await self.send_json({'type': 'error', 'message': '올바르지 않은 요청입니다.'})
+            await self.error(gettext_noop('올바르지 않은 요청입니다.'))
         except RedisError:
             logger.exception('Matchmaking backend unavailable')
-            await self.send_json({'type': 'error', 'message': '연결 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'})
+            await self.error(gettext_noop('연결 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.'))
             await self.close(code=1013)
 
     async def handle(self, data):
@@ -171,14 +198,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.send_json({'type': 'pong'})
         elif kind in ('join', 'next'):
             if time.monotonic() - self.last_join < 1:
-                await self.send_json({'type': 'error', 'message': '잠시 후 다시 시도해 주세요.'})
+                await self.error(gettext_noop('잠시 후 다시 시도해 주세요.'))
                 return
             self.last_join = time.monotonic()
             if 'lang' in data or 'interests' in data:
                 self.prefs = self.parse_prefs(data)
             if kind == 'next':
                 await self.leave()
-            await self.join()
+            if await self.passes_gate():
+                await self.join()
         elif kind == 'resume':
             await self.resume(data)
         elif kind == 'leave':
@@ -197,7 +225,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 if not isinstance(message, str) or not 1 <= len(message.strip()) <= 2000:
                     raise ValueError
                 payload['message'] = message.strip()
-                payload['username'] = self.scope['user'].get_username() or '상대방'
+                # Guests have no name; the receiving page shows "partner" in its own language.
+                payload['username'] = self.scope['user'].get_username()
                 self.remember('me', payload['message'])
             elif kind == 'media':
                 if not all(isinstance(data.get(k), bool) for k in ('audio', 'video')):
@@ -246,7 +275,10 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 return 'waiting'
             if state[0] == 'banned':
                 self.waiting = False
-                await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
+                # A single-use code lets the user appeal without an account or any identifier.
+                code = secrets.token_urlsafe(12)
+                await self.matcher.redis.set(sanctions.appeal_key(code), self.who, ex=int(state[1]) + 86400)
+                await self.send_json({'type': 'banned', 'retry_after': int(state[1]), 'appeal': code})
                 return 'banned'
             if state[0] != 'new_match':
                 return state[0]
@@ -318,7 +350,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         if reason not in Report.Reason.values or match not in self.history:
             raise ValueError
         if await limits.ahit('report:' + self.who, 3600) > settings.REPORTS_PER_HOUR:
-            await self.send_json({'type': 'error', 'message': '신고가 너무 많습니다. 잠시 후 다시 시도해 주세요.'})
+            await self.error(gettext_noop('신고가 너무 많습니다. 잠시 후 다시 시도해 주세요.'))
             return
         entry = self.history.pop(match)  # one report per match
         target = entry['who']
@@ -326,9 +358,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         # reporter too, so they only get the per-connection exclusion that leave() sets.
         banned = target != self.who and await self.matcher.report(self.who, target)
         await limits.acount('reports_total')
-        await database_sync_to_async(Report.objects.create)(
+        report = await database_sync_to_async(Report.objects.create)(
             reporter=self.who, reported=target, reason=reason, match_id=match, banned=banned,
             evidence=list(entry['lines']))
+        if banned:
+            await database_sync_to_async(sanctions.record_auto_ban)(target, report)
         if self.match_id == match:
             await self.leave()
         await self.send_json({'type': 'reported', 'match_id': match})

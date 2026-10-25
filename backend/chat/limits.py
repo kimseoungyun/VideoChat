@@ -57,8 +57,11 @@ def scope_ip(scope):
     return client_ip((scope.get('client') or [None])[0], headers.get(b'x-forwarded-for', b'').decode('latin-1'))
 
 
-def identity(user, ip):
-    """Accounts are tracked by id; guests by hashed IP, so NAT-shared guests share limits."""
+def identity(user, ip, verified=None):
+    """Verified people by their hashed provider id (survives new IPs and accounts), then
+    accounts by id, then guests by hashed IP (so NAT-shared guests share limits)."""
+    if verified:
+        return 'v' + verified[:20]
     return f'u{user.pk}' if user.is_authenticated else 'ip' + anonymize(ip)
 
 
