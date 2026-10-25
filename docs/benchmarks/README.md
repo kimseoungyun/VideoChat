@@ -74,6 +74,8 @@ Windows의 `select()` 한계 때문에 프로세스당 1,000명 이상은 GitHub
 | 4 프로세스, 2,000명 동시 | **31.6 – 84.9%** | **100%** (3회) | 423 / 525 ms | 500 / 672 ms |
 | 1 프로세스, 1,000명 동시, 수신함 용량 50 (스트레스) | — | **100%** (2회) | 792 / 1,957 ms | 77 / 632 ms |
 
+main 병합 후 다시 측정했을 때는 러너가 약 2배 느렸습니다(동시 1,000명 join→matched p50 561ms). 이때 스트레스 조건이 98%로 떨어졌고, 그 원인을 고친 뒤([T11](../troubleshooting.md#t11-한-프로세스에-1000명이-동시에-몰리면-매칭-알림이-유실됨) 2번 항목) [최종 실행](https://github.com/kimseoungyun/VideoChat/actions/runs/40171646156)에서는 모든 조건이 100%였습니다. 스트레스 조건에서는 2,000명분 중 채팅 메시지 1건이 재시도 끝에 버려졌습니다(매칭은 100%).
+
 수정 전 실패는 channels_redis 수신함 초과(`ChannelFull`)로 생긴 매칭 알림 유실이었습니다. 원인 분석과 해결은 [트러블슈팅 T11](../troubleshooting.md#t11-한-프로세스에-1000명이-동시에-몰리면-매칭-알림이-유실됨)에 있습니다. 스트레스 조건의 지연이 큰 것은 backpressure로 전송을 기다린 시간입니다. 메시지를 버리는 대신 늦게 전달한 결과입니다.
 
 실행 기록: [수정 전](https://github.com/kimseoungyun/VideoChat/actions/runs/40168907931) · [수정 후](https://github.com/kimseoungyun/VideoChat/actions/runs/40170066655)

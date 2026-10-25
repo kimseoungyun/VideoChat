@@ -57,7 +57,7 @@ Redis는 미리 실행해 두세요(`docker compose up redis -d`). 전체 개발
 Redis를 실행한 상태에서 다음을 실행합니다.
 
 ```powershell
-.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 25개: 매칭·시그널링·신고·제한·지표·계정·마이그레이션
+.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 28개: 매칭·시그널링·신고·제한·지표·계정·마이그레이션·과부하
 npm install
 npx playwright install chromium firefox
 $env:BASE_URL = 'http://127.0.0.1:8000/chat/'

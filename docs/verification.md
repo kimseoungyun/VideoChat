@@ -31,10 +31,10 @@
 | JS 오류 | 통과 | 브라우저 테스트에서 pageerror 없음 |
 | 브라우저 간 상호 운용 | 통과 (CI) | Chromium ↔ Firefox 영상 협상, 양방향 채팅, 종료 알림 |
 | 레거시 계정 마이그레이션 | 통과 | CustomUser 행이 같은 비밀번호 해시로 auth.User에 이동, 이름이 겹치면 기존 계정 유지. 로컬 DB 복사본에서도 확인(원본 DB 미변경) |
-| channel layer 과부하 | 통과 | 수신함 용량 20(로컬)·50(Linux)에서 동시 접속 100% 매칭, `unpair` 롤백 |
+| channel layer 과부하 | 통과 | 수신함 용량 5·20(로컬)·50(Linux)에서 동시 접속 100% 매칭. 매칭 알림 전달 실패를 주입하면 재시도로 매칭되고, 3번 실패하면 둘 다 대기열로 돌아가 다음 사용자와 매칭 |
 | Docker | 통과 (CI) | 개발 compose 기동 후 `/health/`, 운영 이미지(Daphne, DEBUG=0)에서 `/metrics/` 토큰 검사와 실제 WebSocket 200명 매칭 100% |
 
-- `python backend/manage.py test chat main`: **25 tests, OK** (2026-10-25, 로컬과 CI)
+- `python backend/manage.py test chat main`: **28 tests, OK** (2026-10-25, 로컬과 CI)
 - `makemigrations --check --dry-run`: **No changes detected**
 - `check --deploy`: 운영용 환경변수(무작위 SECRET_KEY)를 지정한 상태에서 **no issues**
 - `collectstatic --noinput`: 정적 파일 **134개 수집**
