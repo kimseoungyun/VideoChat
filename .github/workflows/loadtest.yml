@@ -33,14 +33,24 @@ jobs:
         if: always()
         run: |
           python - <<'EOF'
-          import json, os
-          rows = [json.loads(line) for line in open(os.environ['OUT'])]
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write('| servers | clients | ramp | paired % | failures | matched p50/p95 ms | chat p50/p95 ms |\n|---|---|---|---|---|---|---|\n')
-              for r in rows:
-                  m, c = r['join_to_matched_ms'], r['chat_relay_ms']
-                  summary.write(f"| {r['servers']} | {r['clients']} | {r['ramp_s']} | {r['correctly_paired_pct']} | {sum(r['failures'].values())} | {m['p50']} / {m['p95']} | {c['p50']} / {c['p95']} |\n")
-                  print('::notice title=load::' + json.dumps(r))
+          import json, os, statistics, sys
+          from collections import defaultdict
+          cases = defaultdict(list)
+          for line in open(os.environ['OUT']):
+              r = json.loads(line)
+              cases[(r['label'], r['servers'], r['clients'], r['ramp_s'])].append(r)
+          ok = True
+          # One short notice per case: GitHub shows at most 10 annotations per step.
+          for (label, servers, clients, ramp), runs in cases.items():
+              med = lambda key, p: round(statistics.median(r[key][p] or 0 for r in runs))
+              paired = min(r['correctly_paired_pct'] for r in runs)
+              failures = sum(sum(r['failures'].values()) for r in runs)
+              ok &= paired == 100
+              print(f"::notice title={label}::{servers}x{clients} ramp{ramp:g} n={len(runs)}: paired>={paired}% fail={failures}"
+                    f" | match {med('join_to_matched_ms', 'p50')}/{med('join_to_matched_ms', 'p95')}"
+                    f" chat {med('chat_relay_ms', 'p50')}/{med('chat_relay_ms', 'p95')}"
+                    f" queue95 {med('queued_wait_ms', 'p95')} ms")
+          sys.exit(0 if ok else 1)
           EOF
       - uses: actions/upload-artifact@v4
         if: always()
