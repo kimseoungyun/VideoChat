@@ -131,19 +131,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             self.last_join = time.monotonic()
             if kind == 'next':
                 await self.leave()
-            state = await self.matcher.transition('join', self.channel_name, self.who)
-            if state[0] == 'waiting':
-                await self.send_json({'type': 'waiting'})
-            elif state[0] == 'banned':
-                await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
-            elif state[0] == 'new_match':
-                _, peer, match = state
-                if await self.deliver(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True}):
-                    await self.pair_ready({'match_id': match, 'initiator': False})
-                else:
-                    # Never leave a half-announced match: the peer would wait on a pair it never saw.
-                    await self.matcher.transition('unpair', self.channel_name)
-                    await self.send_json({'type': 'waiting'})
+            await self.join()
         elif kind == 'leave':
             await self.leave()
             await self.send_json({'type': 'idle'})
@@ -181,6 +169,24 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             await self.deliver(self.peer, {'type': 'relay', 'payload': payload})
         else:
             raise ValueError
+
+    async def join(self, attempts=3):
+        for attempt in range(attempts):
+            state = await self.matcher.transition('join', self.channel_name, self.who)
+            if state[0] == 'waiting':
+                return await self.send_json({'type': 'waiting'})
+            if state[0] == 'banned':
+                return await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
+            if state[0] != 'new_match':
+                return
+            _, peer, match = state
+            if await self.deliver(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True}):
+                return await self.pair_ready({'match_id': match, 'initiator': False})
+            # Never leave a half-announced match: the peer would wait on a pair it never saw.
+            # Requeue the peer and match again ourselves; matching only runs on join, so
+            # requeueing both would strand them until someone new arrives.
+            await self.matcher.transition('release' if attempt < attempts - 1 else 'unpair', self.channel_name)
+        await self.send_json({'type': 'waiting'})
 
     async def report(self, data):
         reason = data.get('reason')

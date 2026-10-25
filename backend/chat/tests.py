@@ -12,6 +12,7 @@ from channels.auth import AuthMiddlewareStack
 from channels.routing import URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 from . import limits
+from .consumers import ChatConsumer
 from .routing import websocket_urlpatterns
 from .matchmaking import Matchmaker
 from .models import Report
@@ -102,6 +103,17 @@ class MatchmakingTests(SimpleTestCase):
             again = await m.transition('join', 'd')
             self.assertEqual(again[0], 'new_match')
             self.assertEqual({again[1], (await m.transition('state', 'c'))[1]}, {'a', 'b'})
+        await self.async_case(run)
+
+    async def test_release_requeues_peer_so_caller_can_retry(self):
+        async def run(m):
+            await m.transition('join', 'a')
+            first = await m.transition('join', 'b')
+            self.assertEqual(await m.transition('release', 'b'), ['idle'])
+            self.assertEqual(await m.transition('state', 'a'), ['waiting'])
+            retry = await m.transition('join', 'b')
+            self.assertEqual(retry[:2], ['new_match', 'a'])
+            self.assertNotEqual(retry[2], first[2])
         await self.async_case(run)
 
     async def test_exclusion_survives_next_after_peer_already_left(self):
@@ -282,6 +294,48 @@ class ModerationTests(TransactionTestCase):
         self.assertEqual(state[0], 'banned')
         self.assertGreater(int(state[1]), 0)
         self.assertEqual(await m.transition('join', 'other', 'ipC'), ['waiting'])
+
+    async def flaky_match_notices(self, failures):
+        """Make the first `failures` pair.ready sends fail as if the inbox stayed full."""
+        real, left = ChatConsumer.deliver, [failures]
+
+        async def deliver(consumer, channel, message):
+            if message['type'] == 'pair.ready' and left[0]:
+                left[0] -= 1
+                return False
+            return await real(consumer, channel, message)
+        return patch.object(ChatConsumer, 'deliver', deliver)
+
+    async def test_undelivered_match_notice_is_retried(self):
+        clients = [communicator(f'10.0.1.{i}') for i in (1, 2)]
+        try:
+            with await self.flaky_match_notices(2):
+                for client in clients:
+                    await client.connect()
+                    await client.receive_json_from()
+                await self.pair(*clients)  # third attempt reaches the peer
+        finally:
+            for client in clients:
+                await client.disconnect()
+
+    async def test_exhausted_retries_requeue_both(self):
+        clients = [communicator(f'10.0.2.{i}') for i in (1, 2, 3)]
+        try:
+            with await self.flaky_match_notices(3):
+                for client in clients:
+                    await client.connect()
+                    await client.receive_json_from()
+                a, b, c = clients
+                await a.send_json_to({'type': 'join'})
+                self.assertEqual((await a.receive_json_from())['type'], 'waiting')
+                await b.send_json_to({'type': 'join'})
+                self.assertEqual((await b.receive_json_from())['type'], 'waiting')
+                self.assertTrue(await a.receive_nothing(timeout=0.1))
+                await c.send_json_to({'type': 'join'})  # a later arrival still finds them
+                self.assertEqual((await c.receive_json_from())['type'], 'matched')
+        finally:
+            for client in clients:
+                await client.disconnect()
 
     @override_settings(WS_MAX_PER_IP=2)
     async def test_connection_limit_per_ip(self):
