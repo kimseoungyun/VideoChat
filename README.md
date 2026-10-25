@@ -22,7 +22,7 @@ Django Channels · Redis · WebRTC로 만든 랜덤 1:1 화상 대화 서비스�
 | 공통 관심사가 있는 상대와 매칭 (초당 10명 도착) | 40 – 46% | **99 – 100%** (대기 p95 +0.3초) |
 | 통화가 실제로 연결됐는지, TURN을 거쳤는지 | 알 수 없음 | 매칭당 1회 집계(`calls_total`, `call_setup_seconds`, `calls_relayed_total`) |
 
-측정 방법과 원자료: [docs/benchmarks](docs/benchmarks/README.md), [통화 품질](docs/call-quality.md), [선호 매칭](docs/matching-preferences.md) · 원인과 해결 과정: [트러블슈팅 T1–T16](docs/troubleshooting.md)
+측정 방법과 원자료: [docs/benchmarks](docs/benchmarks/README.md), [통화 품질](docs/call-quality.md), [선호 매칭](docs/matching-preferences.md) · 원인과 해결 과정: [트러블슈팅 T1–T17](docs/troubleshooting.md)
 
 <p>
   <img src="docs/images/connected-desktop.png" alt="두 사용자가 연결된 화상 대화 화면" width="62%">
@@ -102,7 +102,7 @@ npm run test:resilience  # 통화 중 신호/미디어 끊김 후 같은 대화�
 | 문서 | 내용 |
 | --- | --- |
 | [benchmarks](docs/benchmarks/README.md) | 부하 측정 방법, 원본 대비 결과, 원자료 |
-| [troubleshooting](docs/troubleshooting.md) | 원본 결함과 재구축 중 발견한 문제 16건의 원인·해결·검증 |
+| [troubleshooting](docs/troubleshooting.md) | 원본 결함과 재구축 중 발견한 문제 17건의 원인·해결·검증 |
 | [call-quality](docs/call-quality.md) | 통화 품질 지표, 끊김 후 대화 재개와 ICE restart, 복구율 측정 |
 | [matching-preferences](docs/matching-preferences.md) | 언어·관심사 매칭 규칙과 대기 시간 트레이드오프 측정 |
 | [architecture](docs/architecture.md) | 책임 분리, 매칭 상태 전이, 장애 처리, 확장 제약 |
