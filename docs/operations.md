@@ -64,6 +64,7 @@ Prometheus 텍스트 형식입니다. `DEBUG=1`이면 열려 있고, 운영에�
 | `videochat_match_wait_seconds` | histogram | 매칭까지 기다린 시간(0.5–60초 버킷). 대기열에 있던 쪽과 바로 매칭된 쪽 모두 기록 |
 | `videochat_reports_total`, `videochat_bans_total` | counter | 신고, 자동 제한 |
 | `videochat_http_ratelimited_total{scope}` | counter | `login`, `signup`, `rtc_config` |
+| `videochat_channel_full_dropped_total` | counter | 수신함이 약 3초 동안 가득 차 있어 버린 메시지. 0이 아니면 `CHANNEL_CAPACITY` 상향 또는 프로세스 추가 |
 
 ```yaml
 # prometheus.yml
