@@ -1,0 +1,47 @@
+name: Load test
+on:
+  workflow_dispatch:
+  push:
+    paths: ['backend/chat/**', 'backend/myproj/**', 'loadtest/**', '.github/workflows/loadtest.yml']
+jobs:
+  matching:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      OUT: linux-results.jsonl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: nproc; ulimit -n; free -g
+      - run: LABEL=linux-ci REPEAT=3 bash loadtest/bench.sh
+      - name: Publish results as annotations and summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os
+          rows = [json.loads(line) for line in open(os.environ['OUT'])]
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('| servers | clients | ramp | paired % | failures | matched p50/p95 ms | chat p50/p95 ms |\n|---|---|---|---|---|---|---|\n')
+              for r in rows:
+                  m, c = r['join_to_matched_ms'], r['chat_relay_ms']
+                  summary.write(f"| {r['servers']} | {r['clients']} | {r['ramp_s']} | {r['correctly_paired_pct']} | {sum(r['failures'].values())} | {m['p50']} / {m['p95']} | {c['p50']} / {c['p95']} |\n")
+                  print('::notice title=load::' + json.dumps(r))
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-load-results
+          path: linux-results.jsonl

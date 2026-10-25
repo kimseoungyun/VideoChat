@@ -32,7 +32,7 @@ jobs:
         with:
           version: '11.25.0'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install --with-deps chromium firefox
       - name: Browser flow
         run: |
           python backend/manage.py migrate --noinput
@@ -42,6 +42,7 @@ jobs:
             sleep 1
           done
           pnpm test:e2e
+          pnpm test:interop
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -49,3 +50,41 @@ jobs:
           path: |
             test-results/
             server.log
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Development compose (runserver + Redis)
+        run: |
+          docker compose up -d --build --wait
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/; then break; fi
+            sleep 1
+          done
+          curl --fail --silent --output /dev/null http://127.0.0.1:8000/chat/
+          docker compose down
+      - name: Production image (Daphne, DEBUG=0) with real WebSocket matching
+        run: |
+          docker build -t videochat .
+          docker run -d --name redis --network host redis:7.4-alpine
+          docker run -d --name web --network host \
+            -e DJANGO_DEBUG=0 -e DJANGO_SECRET_KEY="$(openssl rand -hex 40)" \
+            -e DJANGO_ALLOWED_HOSTS=127.0.0.1 -e TRUST_PROXY=1 \
+            -e REDIS_URL=redis://127.0.0.1:6379/0 -e METRICS_TOKEN=ci-token \
+            -e WS_MAX_PER_IP=1000 -e WS_CONNECT_RATE=1000 videochat
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/health/; then break; fi
+            sleep 1
+          done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/metrics/)" = 404
+          curl --fail --silent -H 'X-Forwarded-Proto: https' -H 'Authorization: Bearer ci-token' \
+            http://127.0.0.1:8000/metrics/ | grep -q videochat_ws_active
+          pip install websockets==15.0.1
+          python loadtest/matching.py --base http://127.0.0.1:8000 --clients 200 --ramp 2 | tee result.json
+          python -c "import json; r = json.load(open('result.json')); assert r['correctly_paired_pct'] == 100, r"
+      - if: failure()
+        run: docker compose logs; docker logs web || true

@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "test:e2e": "node tests/browser.cjs && node tests/rtc-config.cjs && node tests/report.cjs",
+    "test:interop": "node tests/firefox.cjs",
     "format": "prettier --write \"backend/**/*.css\" \"backend/**/*.js\" \"tests/*.cjs\""
   },
   "devDependencies": {
