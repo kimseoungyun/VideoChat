@@ -128,10 +128,16 @@ async function start() {
         "카메라와 마이크를 찾을 수 없습니다. 장치 연결을 확인해 주세요.",
       NotReadableError:
         "다른 앱에서 장치를 사용 중일 수 있습니다. 장치를 확인해 주세요.",
+      AbortError:
+        "장치를 시작하지 못했습니다. 다른 앱이 카메라를 사용 중인지 확인해 주세요.",
+      OverconstrainedError:
+        "지원되는 카메라 해상도를 찾지 못했습니다. 다른 카메라를 연결해 주세요.",
     };
     notice(
-      errors[error.name] ||
-        "카메라를 열 수 없습니다. HTTPS 또는 localhost에서 접속해 주세요.",
+      !window.isSecureContext
+        ? "카메라를 열 수 없습니다. HTTPS 또는 localhost에서 접속해 주세요."
+        : errors[error.name] ||
+            "카메라를 열 수 없습니다. 장치 연결과 브라우저 권한을 확인해 주세요.",
     );
   }
 }
