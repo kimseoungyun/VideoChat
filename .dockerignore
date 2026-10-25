@@ -1,0 +1,16 @@
+.git
+.venv
+VideoChat_venv
+.runtime
+node_modules
+test-results
+*.zip
+**/__pycache__
+**/*.sqlite3
+.env
+.env.*
+**/*.db
+**/*.pem
+**/*.key
+**/*.log
+backend/staticfiles

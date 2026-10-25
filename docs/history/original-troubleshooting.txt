@@ -1,0 +1,81 @@
+1. 처음에 ws://localhost:8000/chat/1/로 주소가 repath가 되지 않아서 ai 대신에 직접 찾아본 결과, 버전에 따라 추가적인 조치가 필요한 것이었음. 그래서 redis 서버 프로그램을 새로 설치해서 실행시켜주고 로컬서버를 작동하니, repath 및 웹페이지로 접속할 수 있었음.
+2. audio의 사운드카드가 문제 있어도 error로 캐치하기 때문에, 내 노트북의 상황상 video만 true값을 줘서 localscream을 작동시킴
+3. consumer.py에서 'message'에 대한 데이터만 처리하게 만들어져 있어서 sdp와 candidate 데이터가 넘어온것을 event로 감지하지 못했음
+4. 데이터가 잘 넘어오지만 정작 가장 중요한 remotevideo가 나오지 않음. 그래서 원리를 찾아보던 중, offer에 대해서 요청을 승낙하는 응답(Answer)의 부분이 sdp를 다루는 영역에서 안만들어져 있는 것을 확인하고, createoffer 부분을 최종적으로 수정함.
+5. 사용자를 2명으로 제한하기 위해서 consumer.py 파일에서 connect부분에 방의 인원을 세는 코드를 추가했다. 그리고, 추가한다면 json을 보내서 +1 체팅방으로 리디렉션을 하려는 해결책을 구상했지만, 뜻대로 되지 않았다. 그 이유는, connect 함수 부분에서 
+accept 이외의 발생을 모두 error로 감지해서 사전에 차단했기 때문이다. 그래서, 먼저 accept를 실시하고 json을 보내서 리디렉션을 한다음에 close를 하는 식으로 조치했다. 그 전에 인원수 조건문이 없어도 세 번째 사용자가 접근하면 방 자체가 터졌는데, 
+그건 connect 함수의 group_add 부분을 통해서 그룹의 인원이 변동되어서 error 발생 후, 폭파된 것 같다.
+6. 뭔가 파일을 수정해도 반영이 되는 것 같기도 하고, 안되는 것 같기도 해서 이상했는데, 알고보니 브라우저 상의 캐시가 문제가 될 수 있다고 했다. 그래서, shift+f5 or ctrl+f5로 새로고침하니 잘 반영되었다.
+7. migrate이 모든 코드가 맞는데 안되는 경우가 있다. python manage.py clearsession이나 migrations 파일에 숫자 붙은 파일을 제거하고 다시 migrations을 만든다. 만약 db에 문제가 생기면, db도 초기화해주면, 다시 잘된다.
+8. django에서 사용하는 authenticate를 활용해서 이메일만으로 로그인하는 것을 만들려고 했는데, 로그인은 username이 넘어와야지 none값을 내보내지 않는 것 같아서, username을 추가해서 다시 복구했다.
+9. websocket보다 서버가 먼저 끊어지게 되면, websocket의 방 번호 데이터가 db에 저장이 되어, 유령 방이 만들어졌다. 그래서, 서버 시작시, db의 Room 오브젝트를 초기화하는 코드를 추가하려 했고, apps.py를 활용했다.
+하지만, apps에 def ready 넘어도 작동햇지만, warning 문구 때문에, def ready에는 manage.py migrate 명령어에만 반응하게 했고, python manage.py init을 하면 Room이 초기화되게 명령어를 만들었다.
+만약, 번거롭다면, warning을 무시하고, def ready에 delete을 추가하면 되겠다. 추가적으로 setting에 app을 등록할 때, main 대신에 main.apps.~~를 해야지. 추가조치를 반영해서 앱을 구동할 수 있다고 한다.
+10. "상대가 나갔습니다"는 json을 보내기 보다 group.send를 활용해서 해결했다.
+
+
+원리를 정리하자면,
+0. 먼저 websocket을 통해서 연결한다.
+1. getusermedia를 통해서 local의 비디오 및 오디오를 불러오고, 이를 localvideo에 넣어줌으로써, localvideo를 보이게 한다.
+2. 이 localvideo를 track에 추가한 후, 추후에 상대편에게 보내서 상대가 ontrack으로 event를 감지한 후, remotevideo에 넣어주면, 상대 비디오와 오디오를 얻을 수 있다.
+3. 하지만, 결과 상대편에게 보내기 위해서는 중간 다리가 필요한데
+4. 이를 위해서, createpeerconnection 함수를 작동시킴과 동시에 stun 및 turn 서버, sdp 및 offer*Answer, ice candidate 개념이 등장한다.
+
+<다음부터는 전체 논리 과정이다.>
+
+5. WebSocket 연결 설정
+6. RTCPeerConnection 객체 생성
+7. 로컬 스트림의 트랙 추가
+8. ICE 후보 수신 처리
+9. Offer 생성 및 전송
+10. 상대방의 Offer 수신
+11. Answer 생성 및 전송
+12. ICE 후보 추가
+13. 상대방의 미디어 스트림 수신
+14. ICE 연결 상태 모니터링
+
+<<다음부터는 위 논리의 세부 과정이다>>
+
+1. 로컬 미디어 스트림 가져오기
+사용자의 카메라와 마이크에 접근하여 로컬 비디오 및 오디오 스트림을 가져옵니다.
+navigator.mediaDevices.getUserMedia() 메서드를 사용하여 스트림을 요청합니다.
+
+2. WebSocket 연결 설정
+신호 서버와의 WebSocket 연결을 설정합니다.
+이를 통해 두 피어 간의 SDP 및 ICE 후보를 교환합니다.
+
+3. RTCPeerConnection 객체 생성
+RTCPeerConnection 객체를 생성합니다. 이 객체는 피어 간의 연결을 관리합니다.
+ICE 서버(예: STUN/TURN 서버)를 설정합니다.
+
+4. 로컬 스트림의 트랙 추가
+가져온 로컬 스트림의 모든 트랙(비디오 및 오디오)을 RTCPeerConnection 객체에 추가합니다.
+이 과정에서 상대방에게 로컬 트랙이 전송됩니다.
+
+5. ICE 후보 수신 처리
+onicecandidate 이벤트 핸들러를 설정하여 ICE 후보가 생성될 때마다 이를 처리합니다.
+생성된 ICE 후보는 신호 서버를 통해 상대방에게 전송됩니다.
+
+6. Offer 생성 및 전송
+createOffer() 메서드를 호출하여 연결 요청을 생성합니다.
+생성된 Offer는 setLocalDescription() 메서드를 사용하여 로컬 설명으로 설정한 후, 신호 서버를 통해 상대방에게 전송합니다.
+
+7. 상대방의 Offer 수신
+상대방이 WebSocket을 통해 Offer를 수신합니다.
+수신한 Offer를 사용하여 setRemoteDescription() 메서드를 호출하여 원격 설명을 설정합니다.
+
+8. Answer 생성 및 전송
+상대방은 createAnswer() 메서드를 호출하여 응답을 생성합니다.
+생성된 Answer는 setLocalDescription() 메서드를 사용하여 로컬 설명으로 설정한 후, 신호 서버를 통해 원래 피어에게 전송됩니다.
+
+9. ICE 후보 추가
+상대방이 ICE 후보를 수신하면, addIceCandidate() 메서드를 사용하여 로컬 RTCPeerConnection에 추가합니다.
+이 과정은 연결을 최적화하고 안정성을 높이는 데 기여합니다.
+
+10. 상대방의 미디어 스트림 수신
+원격 피어의 트랙이 수신되면 ontrack 이벤트가 발생합니다.
+수신한 원격 스트림은 로컬 비디오 엘리먼트에 연결되어 화면에 표시됩니다.
+
+11. ICE 연결 상태 모니터링
+oniceconnectionstatechange 이벤트 핸들러를 설정하여 ICE 연결 상태가 변경될 때마다 이를 모니터링합니다.
+연결이 성공적으로 이루어졌는지(connected 상태) 확인하고, 연결이 끊어졌거나 실패했을 때 적절한 처리를 수행합니다.

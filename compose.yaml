@@ -1,0 +1,28 @@
+# Local development. Production requires HTTPS termination and static hosting.
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  web:
+    build: .
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000 --noreload"
+    environment:
+      DJANGO_DEBUG: "1"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_PATH: /data/db.sqlite3
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+volumes:
+  app-data:

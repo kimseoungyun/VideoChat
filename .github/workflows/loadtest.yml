@@ -1,0 +1,59 @@
+name: Load test
+on:
+  workflow_dispatch:
+  push:
+    paths: ['backend/chat/**', 'backend/myproj/**', 'loadtest/**', '.github/workflows/loadtest.yml']
+jobs:
+  matching:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      OUT: linux-results.jsonl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: nproc; ulimit -n; free -g
+      - run: LABEL=linux-ci REPEAT=3 bash loadtest/bench.sh
+      - name: Backpressure stress (tiny channel-layer inbox)
+        run: CHANNEL_CAPACITY=50 LABEL=linux-ci-capacity50 REPEAT=2 CASES="1 1000 0" bash loadtest/bench.sh
+      - name: Publish results as annotations and summary
+        if: always()
+        run: |
+          python - <<'EOF'
+          import json, os, statistics, sys
+          from collections import defaultdict
+          cases = defaultdict(list)
+          for line in open(os.environ['OUT']):
+              r = json.loads(line)
+              cases[(r['label'], r['servers'], r['clients'], r['ramp_s'])].append(r)
+          ok = True
+          # One short notice per case: GitHub shows at most 10 annotations per step.
+          for (label, servers, clients, ramp), runs in cases.items():
+              med = lambda key, p: round(statistics.median(r[key][p] or 0 for r in runs))
+              paired = min(r['correctly_paired_pct'] for r in runs)
+              failures = sum(sum(r['failures'].values()) for r in runs)
+              ok &= paired == 100
+              print(f"::notice title={label}::{servers}x{clients} ramp{ramp:g} n={len(runs)}: paired>={paired}% fail={failures}"
+                    f" | match {med('join_to_matched_ms', 'p50')}/{med('join_to_matched_ms', 'p95')}"
+                    f" chat {med('chat_relay_ms', 'p50')}/{med('chat_relay_ms', 'p95')}"
+                    f" queue95 {med('queued_wait_ms', 'p95')} ms")
+          sys.exit(0 if ok else 1)
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-load-results
+          path: linux-results.jsonl
