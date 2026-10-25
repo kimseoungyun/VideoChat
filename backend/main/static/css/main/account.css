@@ -38,6 +38,12 @@
 .account-page .errorlist {
   color: #b14e61;
 }
+.account-page .form-error {
+  color: #b14e61;
+  background: #fbeef1;
+  border-radius: 7px;
+  padding: 10px 12px;
+}
 .account-page a:hover {
   color: #7660dc;
 }

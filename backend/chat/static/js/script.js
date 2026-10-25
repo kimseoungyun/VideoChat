@@ -10,6 +10,8 @@ let reconnects = 0,
   lastPong = 0,
   nextAllowed = 0;
 let nextTimer;
+// The last partner stays reportable after they leave, until the next match or stop.
+let lastMatch = null;
 
 function enableNext() {
   clearTimeout(nextTimer);
@@ -177,12 +179,19 @@ function connect(run) {
         }
       });
   };
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     clearTimeout(openTimer);
     if (socket !== ws) return;
     clearInterval(heartbeat);
     closePeer();
     if (!active) return;
+    if (event.code === 4029) {
+      stop();
+      notice(
+        "같은 네트워크에서 연결이 너무 많습니다. 다른 탭을 닫고 잠시 후 다시 시도해 주세요.",
+      );
+      return;
+    }
     $("next").disabled = true;
     if (++reconnects > 3) {
       stop();
@@ -211,7 +220,8 @@ async function handle(data) {
   } else if (data.type === "matched") {
     closePeer();
     notice();
-    matchId = data.match_id;
+    matchId = lastMatch = data.match_id;
+    $("report").disabled = false;
     enableNext();
     status("새로운 연결을 준비 중", "영상과 음성을 연결하고 있습니다.");
     const id = matchId;
@@ -314,6 +324,17 @@ async function handle(data) {
       "상대방" +
       (data.audio ? "" : " · 음소거") +
       (data.video ? "" : " · 카메라 꺼짐");
+  } else if (data.type === "reported") {
+    status(
+      "신고가 접수됐어요",
+      "이 상대와는 다시 연결되지 않아요. 다음 상대를 눌러 계속하세요.",
+    );
+    message("신고가 접수되었습니다.", "system");
+  } else if (data.type === "banned") {
+    stop();
+    notice(
+      `신고가 누적되어 이용이 일시 제한되었습니다. 약 ${Math.ceil(data.retry_after / 60)}분 후 다시 시도해 주세요.`,
+    );
   } else if (data.type === "error") notice(data.message);
 }
 function stop() {
@@ -329,6 +350,9 @@ function stop() {
     socket = null;
   }
   closePeer();
+  lastMatch = null;
+  $("report").disabled = true;
+  if ($("report-dialog").open) $("report-dialog").close();
   stream?.getTracks().forEach((track) => track.stop());
   stream = null;
   $("localVideo").srcObject = null;
@@ -360,6 +384,24 @@ $("next").addEventListener("click", () => {
   notice();
   status("대화 상대를 찾고 있어요");
   send({ type: "next" });
+});
+$("report").addEventListener("click", () => {
+  if (!lastMatch) return;
+  $("report-form").reset();
+  $("report-dialog").returnValue = "";
+  $("report-dialog").showModal();
+});
+$("report-cancel").addEventListener("click", () => $("report-dialog").close());
+$("report-dialog").addEventListener("close", () => {
+  const reason = new FormData($("report-form")).get("reason");
+  if ($("report-dialog").returnValue !== "submit" || !reason || !lastMatch)
+    return;
+  if (send({ type: "report", match_id: lastMatch, reason })) {
+    lastMatch = null;
+    $("report").disabled = true;
+    closePeer();
+    status("신고를 접수하고 있어요");
+  }
 });
 for (const [id, kind] of [
   ["toggle-camera", "video"],

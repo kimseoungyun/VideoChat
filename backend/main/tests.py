@@ -1,8 +1,12 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
+from chat.testing import isolated_prefix
 
 
 class AccountTests(TestCase):
+    def setUp(self):
+        isolated_prefix(self)
+
     def test_signup_validates_password_and_duplicate_username(self):
         data = {'username': 'tester', 'email': 'test@example.com',
                 'password1': 'A-long-new-password-789!', 'password2': 'A-long-new-password-789!'}

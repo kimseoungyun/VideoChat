@@ -4,9 +4,13 @@ import json
 import logging
 import time
 from contextlib import suppress
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from django.conf import settings
 from redis.exceptions import RedisError
+from . import limits
 from .matchmaking import Matchmaker
+from .models import Report
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +18,32 @@ logger = logging.getLogger(__name__)
 class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         self.matcher = Matchmaker()
-        self.match_id = None
+        # Set only from Redis-confirmed pair_ready; relays trust these instead of re-reading Redis.
+        self.match_id = self.peer = None
+        # The last partner stays reportable after they leave, until the next match.
+        self.last_match = self.last_peer_who = None
         self.tokens = 100.0
         self.updated = time.monotonic()
         self.last_seen = self.updated
         self.last_join = 0
+        self.watchdog = None
+        ip = limits.scope_ip(self.scope)
+        self.ip_key = limits.anonymize(ip)
+        self.who = limits.identity(self.scope['user'], ip)
+        # Accept first so the browser receives a close code it can explain to the user.
         await self.accept()
+        if await limits.ahit('ws:' + self.ip_key, 60) > settings.WS_CONNECT_RATE:
+            return await self.reject('connect_rate')
+        if not await limits.track_connection(self.ip_key, self.channel_name, settings.WS_MAX_PER_IP,
+                                             settings.PRESENCE_TTL):
+            return await self.reject('ip_limit')
+        await limits.acount('ws_connections_total')
         await self.send_json({'type': 'ready'})
         self.watchdog = asyncio.create_task(self.watch_presence())
+
+    async def reject(self, reason):
+        await limits.acount(f'ws_rejected_total{{reason="{reason}"}}')
+        await self.close(code=4029)
 
     async def watch_presence(self):
         while True:
@@ -35,19 +57,20 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 return
 
     async def disconnect(self, code):
+        if not self.watchdog:
+            return
         self.watchdog.cancel()
         with suppress(asyncio.CancelledError):
             await self.watchdog
+        await limits.drop_connection(self.ip_key, self.channel_name)
         try:
             await self.leave()
         except RedisError:
             logger.warning('Presence cleanup deferred to TTL')
-        finally:
-            await self.matcher.close()
 
     async def leave(self):
         peer, match = await self.matcher.transition('leave', self.channel_name)
-        self.match_id = None
+        self.match_id = self.peer = None
         if peer:
             await self.channel_layer.send(peer, {'type': 'peer.left', 'match_id': match})
 
@@ -78,6 +101,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         kind = data.get('type')
         if kind == 'ping':
             self.last_seen = time.monotonic()
+            await limits.refresh_connection(self.ip_key, self.channel_name, settings.PRESENCE_TTL)
             state = await self.matcher.transition('state', self.channel_name)
             if state[0] == 'expired':
                 await self.close(code=1012)
@@ -92,9 +116,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
             self.last_join = time.monotonic()
             if kind == 'next':
                 await self.leave()
-            state = await self.matcher.transition('join', self.channel_name)
+            state = await self.matcher.transition('join', self.channel_name, self.who)
             if state[0] == 'waiting':
                 await self.send_json({'type': 'waiting'})
+            elif state[0] == 'banned':
+                await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
             elif state[0] == 'new_match':
                 _, peer, match = state
                 await self.channel_layer.send(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True})
@@ -102,11 +128,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         elif kind == 'leave':
             await self.leave()
             await self.send_json({'type': 'idle'})
+        elif kind == 'report':
+            await self.report(data)
         elif kind in ('signal', 'chat', 'media'):
-            state = await self.matcher.transition('state', self.channel_name)
-            if state[0] != 'matched' or data.get('match_id') != state[2]:
+            if not self.match_id or data.get('match_id') != self.match_id:
                 return
-            payload = {'type': kind, 'match_id': state[2]}
+            payload = {'type': kind, 'match_id': self.match_id}
             if kind == 'chat':
                 message = data.get('message')
                 if not isinstance(message, str) or not 1 <= len(message.strip()) <= 2000:
@@ -131,22 +158,39 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 else:
                     raise ValueError
                 payload['signal'] = signal
-            await self.channel_layer.send(state[1], {'type': 'relay', 'payload': payload})
+            # A peer that already moved on has a different match_id and drops this in relay().
+            await self.channel_layer.send(self.peer, {'type': 'relay', 'payload': payload})
         else:
             raise ValueError
+
+    async def report(self, data):
+        reason = data.get('reason')
+        if reason not in Report.Reason.values or not self.last_match or data.get('match_id') != self.last_match:
+            raise ValueError
+        target, match = self.last_peer_who, self.last_match
+        self.last_match = self.last_peer_who = None  # one report per match
+        # Guests sharing an IP share an identity: blocking or counting it would hit the
+        # reporter too, so they only get the per-connection exclusion that leave() sets.
+        banned = target != self.who and await self.matcher.report(self.who, target)
+        await limits.acount('reports_total')
+        await database_sync_to_async(Report.objects.create)(
+            reporter=self.who, reported=target, reason=reason, match_id=match, banned=banned)
+        if self.match_id == match:
+            await self.leave()
+        await self.send_json({'type': 'reported', 'match_id': match})
 
     async def pair_ready(self, event):
         state = await self.matcher.transition('state', self.channel_name)
         if state[0] == 'matched' and state[2] == event['match_id']:
-            self.match_id = state[2]
+            self.peer, self.match_id, self.last_peer_who = state[1], state[2], state[3]
+            self.last_match = self.match_id
             await self.send_json({'type': 'matched', 'match_id': state[2], 'initiator': event['initiator']})
 
     async def peer_left(self, event):
         if self.match_id == event['match_id']:
-            self.match_id = None
+            self.match_id = self.peer = None
             await self.send_json({'type': 'peer_left', 'match_id': event['match_id']})
 
     async def relay(self, event):
-        state = await self.matcher.transition('state', self.channel_name)
-        if state[0] == 'matched' and state[2] == event['payload']['match_id']:
+        if self.match_id and self.match_id == event['payload']['match_id']:
             await self.send_json(event['payload'])

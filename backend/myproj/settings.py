@@ -39,10 +39,23 @@ TEMPLATES = [{
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3',
                         'NAME': os.getenv('DATABASE_PATH', str(BASE_DIR / 'db.sqlite3'))}}
 REDIS_URL = os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/0')
+REDIS_POOL_SIZE = int(os.getenv('REDIS_POOL_SIZE', '50'))
 CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer',
                               'CONFIG': {'hosts': [REDIS_URL], 'capacity': 200, 'expiry': 30}}}
 MATCHMAKING_PREFIX = os.getenv('MATCHMAKING_PREFIX', 'videochat:{match}:')
 PRESENCE_TTL = 60
+# Abuse limits. Guests behind one NAT share an IP, so per-IP caps are deliberately loose.
+WS_MAX_PER_IP = int(os.getenv('WS_MAX_PER_IP', '10'))
+WS_CONNECT_RATE = int(os.getenv('WS_CONNECT_RATE', '60'))  # new sockets per IP per minute
+LOGIN_FAILURES_PER_USER = 5  # per 15 minutes
+LOGIN_FAILURES_PER_IP = 20
+SIGNUPS_PER_IP = 5  # per hour
+RTC_CONFIG_PER_IP = 60  # per minute
+REPORT_BAN_THRESHOLD = int(os.getenv('REPORT_BAN_THRESHOLD', '3'))  # distinct reporters
+REPORT_WINDOW_SECONDS = 24 * 3600
+REPORT_BAN_SECONDS = int(os.getenv('REPORT_BAN_SECONDS', '3600'))
+REPORT_BLOCK_SECONDS = 24 * 3600
+METRICS_TOKEN = os.getenv('METRICS_TOKEN', '')
 TURN_URLS = [url for url in os.getenv('TURN_URLS', '').split(',') if url]
 TURN_SECRET = os.getenv('TURN_SECRET', '')
 AUTH_PASSWORD_VALIDATORS = [
@@ -65,6 +78,7 @@ SECURE_SSL_REDIRECT = not DEBUG
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
 SECURE_HSTS_PRELOAD = not DEBUG
-# Only enable behind a trusted proxy that overwrites this header.
-if os.getenv('TRUST_PROXY', '0') == '1':
+# Only enable behind a trusted proxy that overwrites these headers.
+TRUST_PROXY = os.getenv('TRUST_PROXY', '0') == '1'
+if TRUST_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

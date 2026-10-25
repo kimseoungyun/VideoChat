@@ -247,6 +247,48 @@ video {
 .danger {
   color: #bc6773;
 }
+.danger-fill {
+  background: #c25468;
+  box-shadow: none;
+}
+#report-dialog {
+  border: 0;
+  border-radius: 16px;
+  padding: 26px;
+  width: min(380px, calc(100vw - 32px));
+  box-shadow: 0 20px 60px #1c243440;
+}
+#report-dialog::backdrop {
+  background: #1c243466;
+}
+#report-dialog h2 {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+#report-dialog p {
+  font-size: 12px;
+  color: #7a8092;
+  margin: 0 0 14px;
+}
+#report-dialog fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 20px;
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-actions button {
+  border-radius: 9px;
+  padding: 11px 15px;
+  font-size: 12px;
+  min-width: 0;
+}
 .notice {
   min-height: 20px;
   font-size: 12px;

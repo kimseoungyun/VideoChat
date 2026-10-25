@@ -1,17 +1,6 @@
-# main/models.py
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-
-
-class Room(models.Model):
-    room_number = models.PositiveIntegerField(unique=True)  # 방 번호는 고유해야 합니다.
-    user_count = models.PositiveIntegerField(default=0)      # 사용자 수
-    created_at = models.DateTimeField(auto_now_add=True)    # 방 생성 시간
-
-    def __str__(self):
-        return f"Room {self.room_number}"
-
-# myapp/models.py
+# Legacy model. AUTH_USER_MODEL never pointed here, so authentication uses auth.User.
+# The table is kept because existing databases may hold rows in it; drop it in a
+# separate, explicit migration once those rows are confirmed disposable.
 from django.contrib.auth.models import AbstractUser, Group, Permission
 from django.db import models
 

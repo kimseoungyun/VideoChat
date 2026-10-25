@@ -28,13 +28,26 @@
       </div>
       <div class="controls">
         <div class="media-controls"><button id="toggle-camera" class="secondary" disabled aria-pressed="false">카메라 끄기</button><button id="toggle-mute" class="secondary" disabled aria-pressed="false">마이크 끄기</button></div>
-        <div class="session-controls"><button id="stop" class="secondary danger" disabled>종료</button><button id="start" class="primary">대화 시작 <span>↗</span></button><button id="next" class="primary" hidden>다음 상대 →</button></div>
+        <div class="session-controls"><button id="report" class="secondary danger" disabled>신고</button><button id="stop" class="secondary danger" disabled>종료</button><button id="start" class="primary">대화 시작 <span>↗</span></button><button id="next" class="primary" hidden>다음 상대 →</button></div>
       </div>
       <p class="notice" id="notice" role="alert"></p>
       <div class="conversation-tip"><span>✦</span><div><strong>첫마디가 어렵다면</strong><p>“오늘 하루 중 가장 좋았던 순간은 언제인가요?”</p></div><span class="tip-index">01 / HELLO</span></div>
     </div>
     <aside class="chat-panel"><div class="chat-heading"><h2>메시지</h2><span>실시간 대화</span></div><div id="messages" role="log" aria-label="대화 메시지" aria-live="polite"><p class="chat-empty">연결되면 메시지를 보낼 수 있어요.<br>짧은 인사로 대화를 시작해 보세요.</p></div><form id="message-form"><label class="sr-only" for="message">메시지</label><input id="message" maxlength="2000" placeholder="메시지를 입력하세요…" autocomplete="off" disabled><button id="send-button" type="submit" aria-label="메시지 전송" disabled>↑</button></form><p class="chat-footnote">대화 내용은 영구 저장하지 않습니다.</p></aside>
   </section>
+  <dialog id="report-dialog" aria-labelledby="report-title">
+    <form method="dialog" id="report-form">
+      <h2 id="report-title">이 상대를 신고할까요?</h2>
+      <p>신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다.</p>
+      <fieldset><legend class="sr-only">신고 사유</legend>
+        <label><input type="radio" name="reason" value="nudity" required> 부적절한 노출</label>
+        <label><input type="radio" name="reason" value="harassment"> 욕설·괴롭힘</label>
+        <label><input type="radio" name="reason" value="spam"> 스팸·광고</label>
+        <label><input type="radio" name="reason" value="other"> 기타</label>
+      </fieldset>
+      <div class="dialog-actions"><button type="button" class="secondary" id="report-cancel">취소</button><button class="primary danger-fill" value="submit">신고하기</button></div>
+    </form>
+  </dialog>
   <footer><span>좋은 대화는 서로를 존중하는 마음에서 시작됩니다.</span><span>개인정보를 공유하지 마세요 · 불편한 대화는 종료하세요</span></footer>
 </main>
 {{ rtc_config|json_script:"rtc-config" }}
