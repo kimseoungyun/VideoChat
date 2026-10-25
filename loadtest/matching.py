@@ -2,6 +2,8 @@
 
 current: N clients join /ws/chat/ at once; checks each match_id has exactly two members,
          then measures join→matched latency and chat relay latency.
+         --interests K gives every client K random interests (out of 8) and reports how many
+         pairs share one; --send-prefs actually sends them, otherwise matching ignores them.
 legacy:  replays the original flow (GET /chat/start_chat/ → /ws/chat/<room>/) and counts
          how many clients ended up in a room of exactly two.
 """
@@ -17,6 +19,7 @@ from urllib.parse import urlsplit
 
 import websockets
 
+INTERESTS = ['music', 'games', 'movies', 'sports', 'travel', 'study', 'pets', 'food']
 
 def percentile(values, p):
     if not values:
@@ -47,7 +50,10 @@ async def current_client(i, args, result, release):
                                       max_queue=None) as ws:
             assert json.loads(await ws.recv())['type'] == 'ready'
             joined = time.perf_counter()
-            await ws.send(json.dumps({'type': 'join'}))
+            interests = sorted(random.Random(args.seed * 100003 + i).sample(INTERESTS, args.interests))
+            result['interests'][i] = set(interests)
+            join = {'type': 'join', 'interests': interests} if args.send_prefs else {'type': 'join'}
+            await ws.send(json.dumps(join))
             deadline = joined + args.timeout
             phase = 'match'
             while True:
@@ -58,6 +64,7 @@ async def current_client(i, args, result, release):
                     result['errors'].append(data['message'])
             # The non-initiator found a waiting peer: its latency is pure server work.
             result['match' if data['initiator'] else 'instant'].append(time.perf_counter() - joined)
+            result['wait'].append(time.perf_counter() - joined)
             result['pairs'][i] = data['match_id']
             phase = 'chat'
             if data['initiator']:
@@ -109,8 +116,8 @@ async def legacy_client(i, args, result, release):
 
 
 async def main(args):
-    result = {'match': [], 'instant': [], 'chat': [], 'pairs': {}, 'done': 0, 'errors': [],
-              'failures': Counter()}
+    result = {'match': [], 'instant': [], 'wait': [], 'chat': [], 'pairs': {}, 'interests': {},
+              'done': 0, 'errors': [], 'failures': Counter()}
     release = asyncio.Event()
     client = legacy_client if args.mode == 'legacy' else current_client
     started = time.perf_counter()
@@ -139,8 +146,18 @@ async def main(args):
         report['queued_wait_ms'] = summary_ms(result['match'])
         report['join_to_matched_ms'] = summary_ms(result['instant'])
         report['chat_relay_ms'] = summary_ms(result['chat'])
+        if args.interests:
+            members = {}
+            for client, match in result['pairs'].items():
+                members.setdefault(match, []).append(result['interests'][client])
+            pairs = [m for m in members.values() if len(m) == 2]
+            report.update(interests_per_client=args.interests, prefs_sent=args.send_prefs,
+                          shared_interest_pct=round(100 * sum(bool(a & b) for a, b in pairs) / max(1, len(pairs)), 1),
+                          wait_ms=summary_ms(result['wait']))
     else:
         report['request_to_room_ms'] = summary_ms(result['match'])
+    if args.label:
+        report.update(label=args.label, seed=args.seed, date=time.strftime('%Y-%m-%d'))
     print(json.dumps(report, ensure_ascii=False))
     if args.json:
         with open(args.json, 'a', encoding='utf-8') as file:
@@ -157,6 +174,10 @@ if __name__ == '__main__':
     parser.add_argument('--timeout', type=float, default=20.0)
     parser.add_argument('--settle', type=float, default=0.5)
     parser.add_argument('--json', help='append the report as one JSON line')
+    parser.add_argument('--interests', type=int, default=0, help='random interests per client')
+    parser.add_argument('--send-prefs', action='store_true', help='send the interests with join')
+    parser.add_argument('--seed', type=int, default=1)
+    parser.add_argument('--label', help='stored with the --json line')
     args = parser.parse_args()
     args.bases = [base.rstrip('/') for base in args.base.split(',')]
     asyncio.run(main(args))

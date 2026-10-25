@@ -2,8 +2,11 @@
 import asyncio
 import json
 import logging
+import secrets
 import time
+from collections import deque
 from contextlib import suppress
+from datetime import datetime, timezone
 from channels.db import database_sync_to_async
 from channels.exceptions import ChannelFull
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -16,6 +19,7 @@ from .models import Report
 logger = logging.getLogger(__name__)
 # Every socket of a process shares one channel-layer inbox; back off while it drains.
 BACKOFF = (0, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
+CALL_EVENTS = ('connected', 'failed', 'recovered', 'restart_failed')
 
 
 class ChatConsumer(AsyncJsonWebsocketConsumer):
@@ -25,6 +29,11 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         self.match_id = self.peer = None
         # The last partner stays reportable after they leave, until the next match.
         self.last_match = self.last_peer_who = None
+        self.resume_token = None
+        self.prefs = ('', ())
+        # Chat relayed through this socket in the current match: report evidence nobody can forge.
+        self.recent = deque(maxlen=20)
+        self.rematch = self.peer_watch = None
         self.tokens = 100.0
         self.updated = time.monotonic()
         self.last_seen = self.updated
@@ -48,6 +57,12 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await limits.acount(f'ws_rejected_total{{reason="{reason}"}}')
         await self.close(code=4029)
 
+    @staticmethod
+    def stop_task(task):
+        # Never cancel the task we are running in: its remaining awaits would be cancelled too.
+        if task and task is not asyncio.current_task():
+            task.cancel()
+
     async def watch_presence(self):
         while True:
             await asyncio.sleep(15)
@@ -62,12 +77,15 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def disconnect(self, code):
         if not self.watchdog:
             return
-        self.watchdog.cancel()
+        for task in (self.watchdog, self.rematch, self.peer_watch):
+            self.stop_task(task)
         with suppress(asyncio.CancelledError):
             await self.watchdog
         await limits.drop_connection(self.ip_key, self.channel_name)
         try:
-            await self.leave()
+            # A dropped socket mid-call is usually a network blip: hold the call for a resume.
+            if not (self.match_id and await self.suspend()):
+                await self.leave()
         except RedisError:
             logger.warning('Presence cleanup deferred to TTL')
 
@@ -82,7 +100,20 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         await limits.acount('channel_full_dropped_total')
         return False
 
+    async def suspend(self):
+        peer, match = await self.matcher.suspend(self.channel_name)
+        if not peer:
+            return False
+        await limits.acount('sessions_suspended_total')
+        await self.deliver(peer, {'type': 'peer.suspended', 'match_id': match})
+        return True
+
     async def leave(self):
+        self.stop_task(self.rematch)
+        self.stop_task(self.peer_watch)
+        if self.resume_token:
+            await self.matcher.revoke_resume_token(self.resume_token)
+            self.resume_token = None
         peer, match = await self.matcher.transition('leave', self.channel_name)
         self.match_id = self.peer = None
         if peer:
@@ -129,14 +160,20 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({'type': 'error', 'message': '잠시 후 다시 시도해 주세요.'})
                 return
             self.last_join = time.monotonic()
+            if 'lang' in data or 'interests' in data:
+                self.prefs = self.parse_prefs(data)
             if kind == 'next':
                 await self.leave()
             await self.join()
+        elif kind == 'resume':
+            await self.resume(data)
         elif kind == 'leave':
             await self.leave()
             await self.send_json({'type': 'idle'})
         elif kind == 'report':
             await self.report(data)
+        elif kind == 'stats':
+            await self.record_stats(data)
         elif kind in ('signal', 'chat', 'media'):
             if not self.match_id or data.get('match_id') != self.match_id:
                 return
@@ -147,6 +184,7 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                     raise ValueError
                 payload['message'] = message.strip()
                 payload['username'] = self.scope['user'].get_username() or '상대방'
+                self.remember('me', payload['message'])
             elif kind == 'media':
                 if not all(isinstance(data.get(k), bool) for k in ('audio', 'video')):
                     raise ValueError
@@ -162,7 +200,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
                 elif 'candidate' in signal:
                     if not isinstance(signal['candidate'], dict):
                         raise ValueError
-                else:
+                # The answering side asks the offerer for an ICE restart. `is True`: 1 == True in Python.
+                elif list(signal) != ['restart'] or signal['restart'] is not True:
                     raise ValueError
                 payload['signal'] = signal
             # A peer that already moved on has a different match_id and drops this in relay().
@@ -170,23 +209,82 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         else:
             raise ValueError
 
-    async def join(self, attempts=3):
+    @staticmethod
+    def parse_prefs(data):
+        lang, interests = data.get('lang', ''), data.get('interests', [])
+        if lang not in ('', *settings.MATCH_LANGUAGES) or not isinstance(interests, list) or len(interests) > 3 \
+                or not set(interests) <= set(settings.MATCH_INTERESTS):
+            raise ValueError
+        return lang, tuple(sorted(set(interests)))
+
+    async def join(self):
+        self.stop_task(self.rematch)
+        if await self.try_match() == 'waiting' and any(self.prefs):
+            self.rematch = asyncio.create_task(self.retry_match())
+
+    async def try_match(self, attempts=3, announce=True):
         for attempt in range(attempts):
-            state = await self.matcher.transition('join', self.channel_name, self.who)
+            state = await self.matcher.join(self.channel_name, self.who, *self.prefs)
             if state[0] == 'waiting':
-                return await self.send_json({'type': 'waiting'})
+                if announce:
+                    await self.send_json({'type': 'waiting'})
+                return 'waiting'
             if state[0] == 'banned':
-                return await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
+                await self.send_json({'type': 'banned', 'retry_after': int(state[1])})
+                return 'banned'
             if state[0] != 'new_match':
-                return
+                return state[0]
             _, peer, match = state
             if await self.deliver(peer, {'type': 'pair.ready', 'match_id': match, 'initiator': True}):
-                return await self.pair_ready({'match_id': match, 'initiator': False})
+                await self.pair_ready({'match_id': match, 'initiator': False})
+                return 'matched'
             # Never leave a half-announced match: the peer would wait on a pair it never saw.
             # Requeue the peer and match again ourselves; matching only runs on join, so
             # requeueing both would strand them until someone new arrives.
             await self.matcher.transition('release' if attempt < attempts - 1 else 'unpair', self.channel_name)
-        await self.send_json({'type': 'waiting'})
+        if announce:
+            await self.send_json({'type': 'waiting'})
+        return 'waiting'
+
+    async def retry_match(self):
+        """Matching only runs on join, so re-run it once preferences relax: two waiting users
+        with different interests must still meet even if nobody else arrives."""
+        try:
+            await asyncio.sleep(settings.MATCH_RELAX_SECONDS + 0.5)
+            while not self.match_id and await self.try_match(announce=False) == 'waiting':
+                await asyncio.sleep(5)
+        except RedisError:
+            logger.warning('Preference rematch skipped: Redis unavailable')
+
+    async def resume(self, data):
+        token = data.get('token')
+        if not isinstance(token, str) or not 8 <= len(token) <= 64 or self.match_id:
+            raise ValueError
+        state = await self.matcher.resume(self.channel_name, token, self.who)
+        if state[0] != 'resumed':
+            await limits.acount('sessions_resumed_total{outcome="expired"}')
+            return await self.send_json({'type': 'resume_failed'})
+        self.who = state[4]
+        _, peer, match, peer_who, common = await self.matcher.transition('state', self.channel_name)
+        self.peer, self.match_id, self.last_match, self.last_peer_who = peer, match, match, peer_who
+        self.resume_token = secrets.token_urlsafe(18)
+        await self.matcher.issue_resume_token(self.channel_name, self.resume_token)
+        await limits.acount('sessions_resumed_total{outcome="resumed"}')
+        await self.deliver(peer, {'type': 'peer.moved', 'match_id': match, 'channel': self.channel_name})
+        await self.send_json({'type': 'resumed', 'match_id': match, 'resume_token': self.resume_token,
+                              'common': [t for t in common.split(',') if t]})
+
+    async def record_stats(self, data):
+        event, match = data.get('event'), data.get('match_id')
+        setup_ms, restart_ms = data.get('setup_ms'), data.get('restart_ms')
+        if event not in CALL_EVENTS or not match or match != self.last_match \
+                or not all(v is None or (isinstance(v, int) and 0 <= v <= 120000) for v in (setup_ms, restart_ms)) \
+                or not isinstance(data.get('relay', False), bool):
+            raise ValueError
+        await limits.record_call(match, event, setup_ms, data.get('relay', False), restart_ms)
+
+    def remember(self, sender, text):
+        self.recent.append({'from': sender, 'text': text, 'at': datetime.now(timezone.utc).isoformat()})
 
     async def report(self, data):
         reason = data.get('reason')
@@ -199,7 +297,8 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         banned = target != self.who and await self.matcher.report(self.who, target)
         await limits.acount('reports_total')
         await database_sync_to_async(Report.objects.create)(
-            reporter=self.who, reported=target, reason=reason, match_id=match, banned=banned)
+            reporter=self.who, reported=target, reason=reason, match_id=match, banned=banned,
+            evidence=list(self.recent))
         if self.match_id == match:
             await self.leave()
         await self.send_json({'type': 'reported', 'match_id': match})
@@ -207,15 +306,46 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
     async def pair_ready(self, event):
         state = await self.matcher.transition('state', self.channel_name)
         if state[0] == 'matched' and state[2] == event['match_id']:
+            self.stop_task(self.rematch)
             self.peer, self.match_id, self.last_peer_who = state[1], state[2], state[3]
             self.last_match = self.match_id
-            await self.send_json({'type': 'matched', 'match_id': state[2], 'initiator': event['initiator']})
+            self.recent.clear()
+            self.resume_token = secrets.token_urlsafe(18)
+            await self.matcher.issue_resume_token(self.channel_name, self.resume_token)
+            await self.send_json({'type': 'matched', 'match_id': state[2], 'initiator': event['initiator'],
+                                  'resume_token': self.resume_token,
+                                  'common': [t for t in state[4].split(',') if t]})
 
     async def peer_left(self, event):
         if self.match_id == event['match_id']:
+            self.stop_task(self.peer_watch)
             self.match_id = self.peer = None
             await self.send_json({'type': 'peer_left', 'match_id': event['match_id']})
 
+    async def peer_suspended(self, event):
+        if self.match_id != event['match_id']:
+            return
+        await self.send_json({'type': 'peer_reconnecting', 'match_id': self.match_id,
+                              'grace': settings.RESUME_GRACE_SECONDS})
+        self.stop_task(self.peer_watch)
+        self.peer_watch = asyncio.create_task(self.expire_suspended_peer(event['match_id']))
+
+    async def expire_suspended_peer(self, match):
+        await asyncio.sleep(settings.RESUME_GRACE_SECONDS + 1)
+        with suppress(RedisError):
+            state = await self.matcher.transition('state', self.channel_name)
+            if self.match_id == match and (state[0] != 'matched' or state[2] != match):
+                await self.peer_left({'match_id': match})
+
+    async def peer_moved(self, event):
+        if self.match_id == event['match_id']:
+            self.stop_task(self.peer_watch)
+            self.peer = event['channel']
+            await self.send_json({'type': 'peer_resumed', 'match_id': self.match_id})
+
     async def relay(self, event):
-        if self.match_id and self.match_id == event['payload']['match_id']:
-            await self.send_json(event['payload'])
+        payload = event['payload']
+        if self.match_id and self.match_id == payload['match_id']:
+            if payload['type'] == 'chat':
+                self.remember('peer', payload['message'])
+            await self.send_json(payload)

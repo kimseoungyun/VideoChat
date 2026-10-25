@@ -2,8 +2,9 @@
   "name": "videochat-browser-tests",
   "private": true,
   "scripts": {
-    "test:e2e": "node tests/browser.cjs && node tests/rtc-config.cjs && node tests/report.cjs",
+    "test:e2e": "node tests/browser.cjs && node tests/rtc-config.cjs && node tests/report.cjs && node tests/preferences.cjs",
     "test:interop": "node tests/firefox.cjs",
+    "test:resilience": "node tests/resilience.cjs 5 --assert",
     "format": "prettier --write \"backend/**/*.css\" \"backend/**/*.js\" \"tests/*.cjs\""
   },
   "devDependencies": {

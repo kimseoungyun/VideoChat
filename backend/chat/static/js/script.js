@@ -12,7 +12,40 @@ let reconnects = 0,
 let nextTimer;
 // The last partner stays reportable after they leave, until the next match or stop.
 let lastMatch = null;
+// While set, a dropped socket keeps the call and the next socket resumes it.
+let resumeToken = null;
+let initiator = false,
+  matchedAt = 0,
+  everConnected = false,
+  sharedLabel = "";
+// ICE restart: only the initiator offers (no glare); the other side asks for one.
+let restarting = false,
+  restartStarted = 0,
+  restartAttempts = 0,
+  restartTimer,
+  disconnectTimer;
 
+const PREFS_KEY = "videochat:preferences";
+const interestLabel = (code) =>
+  document.querySelector(`input[name="interests"][value="${code}"]`)
+    ?.nextElementSibling.textContent || code;
+
+function preferences() {
+  return {
+    lang: $("pref-lang").value,
+    interests: [
+      ...document.querySelectorAll('input[name="interests"]:checked'),
+    ].map((input) => input.value),
+  };
+}
+function restorePreferences() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    if (saved.lang) $("pref-lang").value = saved.lang;
+    for (const input of document.querySelectorAll('input[name="interests"]'))
+      input.checked = (saved.interests || []).includes(input.value);
+  } catch {}
+}
 function enableNext() {
   clearTimeout(nextTimer);
   const delay = Math.max(0, nextAllowed - Date.now());
@@ -37,6 +70,9 @@ function send(data) {
   socket.send(JSON.stringify(data));
   return true;
 }
+function join(type = "join") {
+  send({ type, ...preferences() });
+}
 function message(text, kind = "") {
   $("messages").querySelector(".chat-empty")?.remove();
   const row = document.createElement("div");
@@ -50,18 +86,106 @@ function message(text, kind = "") {
 function chatEnabled(enabled) {
   $("message").disabled = $("send-button").disabled = !enabled;
 }
+function report(event, extra = {}) {
+  if (lastMatch) send({ type: "stats", match_id: lastMatch, event, ...extra });
+}
 function closePeer() {
   configRequest?.abort();
   configRequest = null;
   clearTimeout(connectTimer);
+  clearTimeout(restartTimer);
+  clearTimeout(disconnectTimer);
   peer?.close();
   peer = null;
   matchId = null;
+  resumeToken = null;
+  everConnected = restarting = false;
+  restartAttempts = 0;
   candidates = [];
   $("remoteVideo").srcObject = null;
   $("remote-empty").hidden = false;
   $("peer-label").textContent = "새로운 친구";
   chatEnabled(false);
+}
+function failCall(title) {
+  if (!everConnected) report("failed");
+  closePeer();
+  status(title, "다음 상대를 눌러 다시 시도해 주세요.");
+}
+function showConnected() {
+  $("remote-empty").hidden = true;
+  status("대화가 연결됐어요");
+  chatEnabled(true);
+}
+async function usesRelay(pc) {
+  const stats = await pc.getStats();
+  let pair;
+  stats.forEach((s) => {
+    if (s.type === "transport" && s.selectedCandidatePairId)
+      pair = stats.get(s.selectedCandidatePairId);
+  });
+  if (!pair)
+    stats.forEach((s) => {
+      if (s.type === "candidate-pair" && (s.selected || s.nominated) && s.state === "succeeded")
+        pair = s;
+    });
+  return [pair?.localCandidateId, pair?.remoteCandidateId].some(
+    (id) => id && stats.get(id)?.candidateType === "relay",
+  );
+}
+async function onConnected(pc) {
+  if (peer !== pc) return;
+  clearTimeout(connectTimer);
+  clearTimeout(disconnectTimer);
+  showConnected();
+  if (restarting) finishRestart(pc, true);
+  if (!everConnected) {
+    everConnected = true;
+    const setup = Math.round(performance.now() - matchedAt);
+    report("connected", {
+      setup_ms: Math.min(setup, 120000),
+      relay: await usesRelay(pc).catch(() => false),
+    });
+  }
+}
+function requestRestart(pc) {
+  if (peer !== pc || restarting) return;
+  if (!everConnected) return failCall("영상 연결에 실패했어요");
+  if (restartAttempts >= 2) return failCall("영상 연결을 복구하지 못했어요");
+  beginRestart(pc);
+  if (initiator) offerRestart(pc);
+  else send({ type: "signal", match_id: matchId, signal: { restart: true } });
+}
+function beginRestart(pc) {
+  restarting = true;
+  restartAttempts++;
+  restartStarted = performance.now();
+  status("연결 복구 중", "영상 연결을 다시 맺고 있습니다.");
+  clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    if (peer === pc && restarting) finishRestart(pc, false);
+  }, 12000);
+}
+async function offerRestart(pc) {
+  await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+  if (peer === pc)
+    send({
+      type: "signal",
+      match_id: matchId,
+      signal: { description: pc.localDescription.toJSON() },
+    });
+}
+function finishRestart(pc, recovered) {
+  clearTimeout(restartTimer);
+  restarting = false;
+  const restart_ms = Math.min(Math.round(performance.now() - restartStarted), 120000);
+  if (initiator) report(recovered ? "recovered" : "restart_failed", { restart_ms });
+  if (recovered) restartAttempts = 0;
+  else requestRestart(pc); // one more attempt, then give up
+}
+// A restart over a path that never really broke fires no state change: check after negotiating.
+function checkRecovered(pc) {
+  if (restarting && pc.connectionState === "connected") onConnected(pc);
 }
 function mediaState() {
   return {
@@ -143,7 +267,7 @@ async function start() {
 }
 function connect(run) {
   if (!active || run !== generation) return;
-  status("서버 연결 중");
+  if (!resumeToken) status("서버 연결 중");
   $("next").disabled = true;
   const ws = new WebSocket(
     (location.protocol === "https:" ? "wss://" : "ws://") +
@@ -170,7 +294,7 @@ function connect(run) {
         if (socket !== ws || run !== generation) return;
         await handle(data);
       })
-      .catch(() => {
+      .catch((error) => {
         if (
           socket === ws &&
           active &&
@@ -181,7 +305,11 @@ function connect(run) {
             "연결을 완료하지 못했어요",
             "다음 상대를 눌러 다시 연결해 주세요.",
           );
-          notice("미디어 연결에 실패했습니다. 네트워크를 확인해 주세요.");
+          notice(
+            error.message.startsWith("같은 네트워크")
+              ? error.message
+              : "미디어 연결에 실패했습니다. 네트워크를 확인해 주세요.",
+          );
         }
       });
   };
@@ -189,7 +317,9 @@ function connect(run) {
     clearTimeout(openTimer);
     if (socket !== ws) return;
     clearInterval(heartbeat);
-    closePeer();
+    // Mid-call, keep the media connection: the server holds the call for the next socket.
+    const keepCall = active && matchId && resumeToken && event.code !== 4029;
+    if (!keepCall) closePeer();
     if (!active) return;
     if (event.code === 4029) {
       stop();
@@ -204,10 +334,13 @@ function connect(run) {
       notice("서버에 연결할 수 없습니다. 잠시 후 다시 시작해 주세요.");
       return;
     }
-    status("연결이 끊어졌어요", "서버에 다시 연결하고 있습니다.");
+    if (keepCall) {
+      chatEnabled(false);
+      status("연결 복구 중", "대화를 유지한 채 서버에 다시 연결하고 있습니다.");
+    } else status("연결이 끊어졌어요", "서버에 다시 연결하고 있습니다.");
     reconnectTimer = setTimeout(
       () => connect(run),
-      1000 * 2 ** (reconnects - 1),
+      keepCall ? 500 * reconnects : 1000 * 2 ** (reconnects - 1),
     );
   };
   ws.onerror = () => notice("서버 연결을 확인하고 있습니다.");
@@ -215,7 +348,8 @@ function connect(run) {
 async function handle(data) {
   if (data.type === "ready") {
     nextAllowed = Date.now() + 1200;
-    send({ type: "join" });
+    if (matchId && resumeToken) send({ type: "resume", token: resumeToken });
+    else join();
   } else if (data.type === "pong") {
     lastPong = Date.now();
     reconnects = 0;
@@ -223,13 +357,41 @@ async function handle(data) {
     closePeer();
     enableNext();
     status("대화 상대를 찾고 있어요", "상대가 준비되면 자동으로 연결됩니다.");
+  } else if (data.type === "resumed" && data.match_id === matchId) {
+    resumeToken = data.resume_token;
+    reconnects = 0;
+    notice();
+    enableNext();
+    if (peer?.connectionState === "connected") showConnected();
+    else if (peer) requestRestart(peer);
+  } else if (data.type === "resume_failed") {
+    closePeer();
+    message("연결이 끊긴 사이 대화가 종료됐어요.", "system");
+    join();
+  } else if (data.type === "peer_reconnecting" && data.match_id === matchId) {
+    chatEnabled(false);
+    status(
+      "상대방 연결이 잠시 끊겼어요",
+      `${data.grace}초 동안 다시 연결되기를 기다립니다.`,
+    );
+  } else if (data.type === "peer_resumed" && data.match_id === matchId) {
+    if (peer?.connectionState === "connected") showConnected();
+    else if (peer) requestRestart(peer);
   } else if (data.type === "matched") {
     closePeer();
     notice();
     matchId = lastMatch = data.match_id;
+    resumeToken = data.resume_token;
+    initiator = data.initiator;
+    matchedAt = performance.now();
     $("report").disabled = false;
     enableNext();
     status("새로운 연결을 준비 중", "영상과 음성을 연결하고 있습니다.");
+    sharedLabel = (data.common || []).map(interestLabel).join(" · ");
+    if (sharedLabel) {
+      $("peer-label").textContent = "새로운 친구 · " + sharedLabel;
+      message("공통 관심사: " + sharedLabel, "system");
+    }
     const id = matchId;
     const controller = new AbortController();
     configRequest = controller;
@@ -240,6 +402,8 @@ async function handle(data) {
         cache: "no-store",
         signal: controller.signal,
       });
+      if (response.status === 429)
+        throw new Error("같은 네트워크에서 연결 요청이 많습니다. 잠시 후 다음 상대를 눌러 주세요.");
       if (!response.ok) throw new Error("RTC configuration unavailable");
       config = await response.json();
     } finally {
@@ -268,32 +432,23 @@ async function handle(data) {
     };
     pc.onconnectionstatechange = () => {
       if (peer !== pc) return;
-      if (pc.connectionState === "connected") {
-        clearTimeout(connectTimer);
-        $("remote-empty").hidden = true;
-        status("대화가 연결됐어요");
-        chatEnabled(true);
-      } else if (pc.connectionState === "failed") {
-        closePeer();
-        status(
-          "영상 연결에 실패했어요",
-          "다음 상대를 눌러 다시 시도해 주세요.",
-        );
-      } else if (pc.connectionState === "disconnected") {
+      if (pc.connectionState === "connected") onConnected(pc);
+      else if (pc.connectionState === "failed") requestRestart(pc);
+      else if (pc.connectionState === "disconnected") {
         status("연결 복구 중", "네트워크 연결을 확인하고 있습니다.");
+        // "disconnected" often heals by itself; restart only if it lingers.
+        clearTimeout(disconnectTimer);
+        disconnectTimer = setTimeout(() => {
+          if (peer === pc && pc.connectionState === "disconnected")
+            requestRestart(pc);
+        }, 3000);
       }
     };
     connectTimer = setTimeout(() => {
-      if (peer === pc && pc.connectionState !== "connected") {
-        closePeer();
-        status(
-          "연결 시간이 초과됐어요",
-          "다음 상대를 눌러 다시 시도해 주세요.",
-        );
-      }
+      if (peer === pc && !everConnected) failCall("연결 시간이 초과됐어요");
     }, 25000);
     syncMedia();
-    if (data.initiator) {
+    if (initiator) {
       await pc.setLocalDescription(await pc.createOffer());
       signal({ description: pc.localDescription.toJSON() });
     }
@@ -306,7 +461,12 @@ async function handle(data) {
     message("상대방이 나갔습니다.", "system");
   } else if (data.type === "signal" && data.match_id === matchId && peer) {
     const pc = peer;
-    if (data.signal.description) {
+    if (data.signal.restart) {
+      if (initiator && !restarting) {
+        beginRestart(pc);
+        await offerRestart(pc);
+      }
+    } else if (data.signal.description) {
       await pc.setRemoteDescription(data.signal.description);
       for (const candidate of candidates) await pc.addIceCandidate(candidate);
       candidates = [];
@@ -319,6 +479,7 @@ async function handle(data) {
             signal: { description: pc.localDescription.toJSON() },
           });
       }
+      checkRecovered(pc);
     } else if (data.signal.candidate) {
       if (pc.remoteDescription) await pc.addIceCandidate(data.signal.candidate);
       else candidates.push(data.signal.candidate);
@@ -328,6 +489,7 @@ async function handle(data) {
   } else if (data.type === "media" && data.match_id === matchId) {
     $("peer-label").textContent =
       "상대방" +
+      (sharedLabel ? " · " + sharedLabel : "") +
       (data.audio ? "" : " · 음소거") +
       (data.video ? "" : " · 카메라 꺼짐");
   } else if (data.type === "reported") {
@@ -389,8 +551,19 @@ $("next").addEventListener("click", () => {
   closePeer();
   notice();
   status("대화 상대를 찾고 있어요");
-  send({ type: "next" });
+  join("next");
 });
+$("preferences").addEventListener("change", (event) => {
+  const checked = document.querySelectorAll('input[name="interests"]:checked');
+  if (checked.length > 3) {
+    event.target.checked = false;
+    notice("관심사는 3개까지 고를 수 있어요.");
+  }
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(preferences()));
+  } catch {}
+});
+$("preferences").addEventListener("submit", (event) => event.preventDefault());
 $("report").addEventListener("click", () => {
   if (!lastMatch) return;
   $("report-form").reset();
@@ -441,3 +614,4 @@ document.addEventListener("click", () => {
       .catch(() => {});
 });
 window.addEventListener("pagehide", stop);
+restorePreferences();

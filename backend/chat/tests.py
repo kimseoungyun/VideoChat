@@ -116,6 +116,25 @@ class MatchmakingTests(SimpleTestCase):
             self.assertNotEqual(retry[2], first[2])
         await self.async_case(run)
 
+    @override_settings(MATCH_RELAX_SECONDS=1)
+    async def test_preferences_share_interest_language_and_relax(self):
+        async def run(m):
+            self.assertEqual(await m.join('d', 'w1', 'ko', ['music']), ['waiting'])
+            self.assertEqual(await m.join('e', 'w2', 'ko', ['games']), ['waiting'])  # nothing shared
+            match = await m.join('f', 'w3', 'ko', ['games', 'music'])  # ties with d and e: oldest wins
+            self.assertEqual(match[1], 'd')
+            self.assertEqual((await m.transition('state', 'f'))[4], 'music')
+            self.assertEqual(await m.join('k', 'w4', 'en', []), ['waiting'])  # e is ko
+            self.assertEqual((await m.join('n', 'w5', '', []))[:2], ['new_match', 'k'])  # no language = any
+            self.assertEqual(await m.join('p', 'w6', 'en', []), ['waiting'])
+            await asyncio.sleep(1.1)
+            relaxed = await m.join('e', 'w2', 'ko', ['games'])  # rescan from the queue after relaxing
+            self.assertEqual(relaxed[:2], ['new_match', 'p'])
+            fields = await m.redis.hgetall(settings.MATCHMAKING_PREFIX + 'metrics')
+            self.assertEqual(fields['matches_by_preference_total{kind="shared"}'], '1')
+            self.assertEqual(fields['matches_by_preference_total{kind="relaxed"}'], '1')
+        await self.async_case(run)
+
     async def test_exclusion_survives_next_after_peer_already_left(self):
         async def run(m):
             await m.transition('join', 'a')
@@ -337,6 +356,118 @@ class ModerationTests(TransactionTestCase):
             for client in clients:
                 await client.disconnect()
 
+    async def connected(self, *clients):
+        for client in clients:
+            self.assertTrue((await client.connect())[0])
+            self.assertEqual((await client.receive_json_from())['type'], 'ready')
+
+    async def matched_pair(self, a, b):
+        await a.send_json_to({'type': 'join'})
+        self.assertEqual((await a.receive_json_from())['type'], 'waiting')
+        await b.send_json_to({'type': 'join'})
+        first, second = await a.receive_json_from(), await b.receive_json_from()
+        self.assertEqual(first['match_id'], second['match_id'])
+        return first, second
+
+    async def test_dropped_socket_resumes_the_same_call(self):
+        a, b, a2, a3 = (communicator(f'10.0.3.{i}') for i in range(4))
+        try:
+            await self.connected(a, b, a2, a3)
+            first, _ = await self.matched_pair(a, b)
+            await a.disconnect()  # network blip: no explicit leave
+            self.assertEqual((await b.receive_json_from())['type'], 'peer_reconnecting')
+            await a2.send_json_to({'type': 'resume', 'token': first['resume_token']})
+            resumed = await a2.receive_json_from()
+            self.assertEqual((resumed['type'], resumed['match_id']), ('resumed', first['match_id']))
+            self.assertEqual((await b.receive_json_from())['type'], 'peer_resumed')
+            await a2.send_json_to({'type': 'chat', 'match_id': first['match_id'], 'message': 'back'})
+            self.assertEqual((await b.receive_json_from())['message'], 'back')
+            await b.send_json_to({'type': 'chat', 'match_id': first['match_id'], 'message': 'welcome'})
+            self.assertEqual((await a2.receive_json_from())['message'], 'welcome')
+            await a3.send_json_to({'type': 'resume', 'token': first['resume_token']})  # single use
+            self.assertEqual((await a3.receive_json_from())['type'], 'resume_failed')
+        finally:
+            for client in (b, a2, a3):
+                await client.disconnect()
+
+    @override_settings(RESUME_GRACE_SECONDS=1)
+    async def test_unresumed_call_ends_after_grace(self):
+        a, b, a2 = (communicator(f'10.0.4.{i}') for i in range(3))
+        try:
+            await self.connected(a, b, a2)
+            first, _ = await self.matched_pair(a, b)
+            await a.disconnect()
+            self.assertEqual((await b.receive_json_from())['type'], 'peer_reconnecting')
+            self.assertEqual((await b.receive_json_from(timeout=4))['type'], 'peer_left')
+            await a2.send_json_to({'type': 'resume', 'token': first['resume_token']})
+            self.assertEqual((await a2.receive_json_from())['type'], 'resume_failed')
+        finally:
+            for client in (b, a2):
+                await client.disconnect()
+
+    @override_settings(MATCH_RELAX_SECONDS=1)
+    async def test_waiting_users_with_different_interests_meet_after_relaxing(self):
+        a, b = communicator('10.0.5.1'), communicator('10.0.5.2')
+        try:
+            await self.connected(a, b)
+            await a.send_json_to({'type': 'join', 'lang': 'ko', 'interests': ['music']})
+            self.assertEqual((await a.receive_json_from())['type'], 'waiting')
+            await b.send_json_to({'type': 'join', 'lang': 'ko', 'interests': ['games']})
+            self.assertEqual((await b.receive_json_from())['type'], 'waiting')
+            first, second = await a.receive_json_from(timeout=4), await b.receive_json_from(timeout=4)
+            self.assertEqual((first['type'], second['type']), ('matched', 'matched'))
+            self.assertEqual(first['common'], [])
+            await a.send_json_to({'type': 'join', 'interests': ['music', 'x']})
+            self.assertEqual((await a.receive_json_from())['type'], 'error')
+        finally:
+            for client in (a, b):
+                await client.disconnect()
+
+    async def test_call_stats_count_once_per_match_and_restart_signal(self):
+        a, b = communicator('10.0.6.1'), communicator('10.0.6.2')
+        try:
+            await self.connected(a, b)
+            first, _ = await self.matched_pair(a, b)
+            match = first['match_id']
+            for client in (a, b):
+                await client.send_json_to({'type': 'stats', 'match_id': match, 'event': 'connected',
+                                           'setup_ms': 1500, 'relay': True})
+            for _ in range(2):
+                await a.send_json_to({'type': 'stats', 'match_id': match, 'event': 'recovered', 'restart_ms': 900})
+            await a.send_json_to({'type': 'stats', 'match_id': match, 'event': 'bogus'})
+            self.assertEqual((await a.receive_json_from())['type'], 'error')
+            await b.send_json_to({'type': 'signal', 'match_id': match, 'signal': {'restart': True}})
+            self.assertEqual((await a.receive_json_from())['signal'], {'restart': True})
+            await b.send_json_to({'type': 'signal', 'match_id': match, 'signal': {'restart': 1}})
+            self.assertEqual((await b.receive_json_from())['type'], 'error')
+            fields = await limits.shared_redis().hgetall(settings.MATCHMAKING_PREFIX + 'metrics')
+            self.assertEqual(fields['calls_total{outcome="connected"}'], '1')
+            self.assertEqual(fields['call_setup_seconds_bucket{le="2"}'], '1')
+            self.assertNotIn('call_setup_seconds_bucket{le="1"}', fields)
+            self.assertEqual(fields['calls_relayed_total'], '1')
+            self.assertEqual(fields['ice_restarts_total{outcome="recovered"}'], '2')
+        finally:
+            for client in (a, b):
+                await client.disconnect()
+
+    async def test_report_stores_server_relayed_conversation(self):
+        a, b = communicator('10.0.7.1'), communicator('10.0.7.2')
+        try:
+            await self.connected(a, b)
+            first, _ = await self.matched_pair(a, b)
+            match = first['match_id']
+            await a.send_json_to({'type': 'chat', 'match_id': match, 'message': 'hi'})
+            await b.receive_json_from()
+            await b.send_json_to({'type': 'chat', 'match_id': match, 'message': 'rude words'})
+            await a.receive_json_from()
+            await a.send_json_to({'type': 'report', 'match_id': match, 'reason': 'harassment'})
+            self.assertEqual((await a.receive_json_from())['type'], 'reported')
+            evidence = (await Report.objects.aget()).evidence
+            self.assertEqual([(e['from'], e['text']) for e in evidence], [('me', 'hi'), ('peer', 'rude words')])
+        finally:
+            for client in (a, b):
+                await client.disconnect()
+
     @override_settings(WS_MAX_PER_IP=2)
     async def test_connection_limit_per_ip(self):
         clients = [communicator('10.0.0.9') for _ in range(3)] + [communicator('10.0.0.10')]
@@ -378,6 +509,17 @@ class HttpLimitTests(TestCase):
         self.client.post('/logout/')
         self.client.post('/login/', {'username': 'tester', 'password': 'wrong'})
         self.assertEqual(self.client.post('/login/', {'username': 'tester', 'password': 'test-password-123!'}).status_code, 302)
+
+    def test_admin_shows_escaped_report_conversation(self):
+        report = Report.objects.create(reporter='ipA', reported='ipB', reason='spam', match_id='m', evidence=[
+            {'from': 'me', 'text': 'hello', 'at': '2026-10-25T00:00:00+00:00'},
+            {'from': 'peer', 'text': '<script>buy now</script>', 'at': '2026-10-25T00:00:01+00:00'}])
+        self.client.force_login(User.objects.create_superuser('admin', password='admin-password-123!'))
+        response = self.client.get(f'/admin/chat/report/{report.pk}/change/')
+        self.assertContains(response, '신고 대상')
+        self.assertContains(response, '&lt;script&gt;buy now&lt;/script&gt;')
+        self.assertNotContains(response, '<script>buy now')
+        self.assertContains(self.client.get('/admin/chat/report/'), '대화 줄 수')
 
     @override_settings(SIGNUPS_PER_IP=1)
     def test_signup_rate(self):

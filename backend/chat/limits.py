@@ -115,6 +115,36 @@ async def acount(metric, amount=1):
         pass
 
 
+SETUP_BUCKETS = (0.5, 1, 2, 3, 5, 10, 20)
+
+
+async def record_call(match, event, setup_ms=None, relay=False, restart_ms=None):
+    """Call-quality counters. Both browsers report connected/failed, so those count once per
+    match; ICE restarts are reported only by the offering side and count every time."""
+    redis = shared_redis()
+    try:
+        if event in ('recovered', 'restart_failed'):
+            outcome = 'recovered' if event == 'recovered' else 'failed'
+            await redis.hincrby(key('metrics'), f'ice_restarts_total{{outcome="{outcome}"}}', 1)
+            return
+        if not await redis.set(key('call', match, event), 1, nx=True, ex=3600):
+            return
+        async with redis.pipeline(transaction=False) as pipe:
+            pipe.hincrby(key('metrics'), f'calls_total{{outcome="{event}"}}', 1)
+            if event == 'connected' and setup_ms is not None:
+                seconds = setup_ms / 1000
+                for le in SETUP_BUCKETS:
+                    if seconds <= le:
+                        pipe.hincrby(key('metrics'), f'call_setup_seconds_bucket{{le="{le:g}"}}', 1)
+                pipe.hincrbyfloat(key('metrics'), 'call_setup_seconds_sum', seconds)
+                pipe.hincrby(key('metrics'), 'call_setup_seconds_count', 1)
+            if event == 'connected' and relay:
+                pipe.hincrby(key('metrics'), 'calls_relayed_total', 1)
+            await pipe.execute()
+    except RedisError:
+        logger.warning('Call stats skipped: Redis unavailable')
+
+
 async def track_connection(ip_key, channel, limit, ttl):
     """Register a live socket; False when this IP already holds `limit` live sockets."""
     try:

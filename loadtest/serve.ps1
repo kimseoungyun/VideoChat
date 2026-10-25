@@ -5,7 +5,11 @@ param([int]$Workers = 1, [string]$RedisUrl = 'redis://127.0.0.1:6379/0', [switch
 $root = Split-Path $PSScriptRoot -Parent
 $pidFile = Join-Path $root '.runtime\loadtest-servers.txt'
 if (Test-Path $pidFile) {
-    Get-Content $pidFile | ForEach-Object { Stop-Process -Id $_ -Confirm:$false -ErrorAction SilentlyContinue }
+    # PIDs get reused: only stop processes that are still our Daphne servers.
+    Get-Content $pidFile | ForEach-Object {
+        Get-Process -Id $_ -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq 'daphne' } |
+            Stop-Process -Confirm:$false
+    }
     Remove-Item $pidFile
 }
 if ($Stop) { return }

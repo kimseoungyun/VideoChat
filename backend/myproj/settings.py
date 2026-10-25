@@ -47,13 +47,20 @@ CHANNEL_LAYERS = {'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer'
                                          'capacity': int(os.getenv('CHANNEL_CAPACITY', '5000'))}}}
 MATCHMAKING_PREFIX = os.getenv('MATCHMAKING_PREFIX', 'videochat:{match}:')
 PRESENCE_TTL = 60
+# A dropped socket keeps its call this long so the browser can resume it on a new socket.
+RESUME_GRACE_SECONDS = int(os.getenv('RESUME_GRACE_SECONDS', '15'))
+# Language/interest preferences are honoured until someone has waited this long.
+MATCH_RELAX_SECONDS = int(os.getenv('MATCH_RELAX_SECONDS', '10'))
+MATCH_LANGUAGES = ('ko', 'en', 'ja', 'zh')
+MATCH_INTERESTS = ('music', 'games', 'movies', 'sports', 'travel', 'study', 'pets', 'food')
 # Abuse limits. Guests behind one NAT share an IP, so per-IP caps are deliberately loose.
 WS_MAX_PER_IP = int(os.getenv('WS_MAX_PER_IP', '10'))
 WS_CONNECT_RATE = int(os.getenv('WS_CONNECT_RATE', '60'))  # new sockets per IP per minute
 LOGIN_FAILURES_PER_USER = 5  # per 15 minutes
 LOGIN_FAILURES_PER_IP = 20
 SIGNUPS_PER_IP = 5  # per hour
-RTC_CONFIG_PER_IP = 60  # per minute
+# One fetch per user per match; a school or office NAT can carry dozens of users.
+RTC_CONFIG_PER_IP = int(os.getenv('RTC_CONFIG_PER_IP', '300'))  # per minute
 REPORT_BAN_THRESHOLD = int(os.getenv('REPORT_BAN_THRESHOLD', '3'))  # distinct reporters
 REPORT_WINDOW_SECONDS = 24 * 3600
 REPORT_BAN_SECONDS = int(os.getenv('REPORT_BAN_SECONDS', '3600'))

@@ -11,6 +11,12 @@
 <header class="site-header"><a class="brand" href="/">◈ <span>VideoChat</span></a><span class="header-note">서로 다른 일상, 하나의 대화</span><a class="account" href="{% url 'login' %}">로그인 ↗</a></header>
 <main>
   <div class="intro"><div><span class="eyebrow">MEET SOMEONE NEW</span><h1>오늘의 새로운 연결.</h1><p>카메라를 확인하고, 가볍게 인사를 건네보세요.</p></div><span class="pill" id="connection-badge">시작할 준비가 됐어요</span></div>
+  <form class="preferences" id="preferences" aria-label="매칭 선호">
+    <label class="pref-language">언어 <select id="pref-lang" name="lang"><option value="">상관없음</option>{% for code, label in languages %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
+    <fieldset class="pref-interests"><legend>관심사 <small>최대 3개 · 같은 관심사인 상대를 먼저 찾고, {{ relax_seconds }}초가 지나면 누구와도 연결해요</small></legend>
+      {% for code, label in interests %}<label class="chip"><input type="checkbox" name="interests" value="{{ code }}"><span>{{ label }}</span></label>{% endfor %}
+    </fieldset>
+  </form>
   <section class="workspace" aria-label="화상 대화">
     <div class="call-area">
       <div class="video-grid">
@@ -33,12 +39,12 @@
       <p class="notice" id="notice" role="alert"></p>
       <div class="conversation-tip"><span>✦</span><div><strong>첫마디가 어렵다면</strong><p>“오늘 하루 중 가장 좋았던 순간은 언제인가요?”</p></div><span class="tip-index">01 / HELLO</span></div>
     </div>
-    <aside class="chat-panel"><div class="chat-heading"><h2>메시지</h2><span>실시간 대화</span></div><div id="messages" role="log" aria-label="대화 메시지" aria-live="polite"><p class="chat-empty">연결되면 메시지를 보낼 수 있어요.<br>짧은 인사로 대화를 시작해 보세요.</p></div><form id="message-form"><label class="sr-only" for="message">메시지</label><input id="message" maxlength="2000" placeholder="메시지를 입력하세요…" autocomplete="off" disabled><button id="send-button" type="submit" aria-label="메시지 전송" disabled>↑</button></form><p class="chat-footnote">대화 내용은 영구 저장하지 않습니다.</p></aside>
+    <aside class="chat-panel"><div class="chat-heading"><h2>메시지</h2><span>실시간 대화</span></div><div id="messages" role="log" aria-label="대화 메시지" aria-live="polite"><p class="chat-empty">연결되면 메시지를 보낼 수 있어요.<br>짧은 인사로 대화를 시작해 보세요.</p></div><form id="message-form"><label class="sr-only" for="message">메시지</label><input id="message" maxlength="2000" placeholder="메시지를 입력하세요…" autocomplete="off" disabled><button id="send-button" type="submit" aria-label="메시지 전송" disabled>↑</button></form><p class="chat-footnote">대화는 저장하지 않아요 · 신고 시에만 최근 메시지 보관</p></aside>
   </section>
   <dialog id="report-dialog" aria-labelledby="report-title">
     <form method="dialog" id="report-form">
       <h2 id="report-title">이 상대를 신고할까요?</h2>
-      <p>신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다.</p>
+      <p>신고하면 대화가 종료되고, 이 상대와는 다시 연결되지 않습니다. 검토를 위해 이번 대화의 최근 메시지(최대 20개)가 신고와 함께 저장됩니다.</p>
       <fieldset><legend class="sr-only">신고 사유</legend>
         <label><input type="radio" name="reason" value="nudity" required> 부적절한 노출</label>
         <label><input type="radio" name="reason" value="harassment"> 욕설·괴롭힘</label>

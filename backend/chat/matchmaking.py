@@ -44,10 +44,27 @@ class Matchmaker:
         self.script = self.redis.register_script(SCRIPT)
         self.report_script = self.redis.register_script(REPORT)
 
-    async def transition(self, action, channel, who=''):
+    async def transition(self, action, channel, who='', extra='', seconds=0):
         prefix = settings.MATCHMAKING_PREFIX
         return await self.script(keys=[prefix + 'queue', prefix + 'member:', prefix],
-                                 args=[action, channel, settings.PRESENCE_TTL, uuid4().hex, who])
+                                 args=[action, channel, settings.PRESENCE_TTL, uuid4().hex, who, extra, seconds])
+
+    async def join(self, channel, who, lang='', tags=()):
+        return await self.transition('join', channel, who, f"{lang}|{','.join(tags)}",
+                                     settings.MATCH_RELAX_SECONDS)
+
+    async def suspend(self, channel):
+        return await self.transition('suspend', channel, seconds=settings.RESUME_GRACE_SECONDS)
+
+    async def resume(self, channel, token, who):
+        return await self.transition('resume', channel, who, token)
+
+    async def issue_resume_token(self, channel, token):
+        # Outlives the call; a stale token fails resume because its match is gone.
+        await self.redis.set(settings.MATCHMAKING_PREFIX + 'resume:' + token, channel, ex=3600)
+
+    async def revoke_resume_token(self, token):
+        await self.redis.delete(settings.MATCHMAKING_PREFIX + 'resume:' + token)
 
     async def report(self, reporter, target):
         """Returns True when this report banned the target."""

@@ -15,6 +15,8 @@ class Report(models.Model):
     reason = models.CharField(max_length=20, choices=Reason.choices)
     match_id = models.CharField(max_length=32)
     banned = models.BooleanField(default=False, help_text='이 신고로 신고 누적 기준에 도달해 일시 제한됨')
+    # Last chat lines the server itself relayed in this match, so the reporter cannot forge them.
+    evidence = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

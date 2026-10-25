@@ -12,9 +12,19 @@ from django.views.decorators.http import require_GET
 from . import limits
 
 
+LANGUAGE_LABELS = {'ko': '한국어', 'en': 'English', 'ja': '日本語', 'zh': '中文'}
+INTEREST_LABELS = {'music': '음악', 'games': '게임', 'movies': '영화', 'sports': '운동',
+                   'travel': '여행', 'study': '공부', 'pets': '반려동물', 'food': '음식'}
+
+
 @never_cache
 def process(request, room_name=None):
-    return render(request, 'chat/process.html', {'rtc_config': {'url': reverse('chat:rtc_config')}})
+    return render(request, 'chat/process.html', {
+        'rtc_config': {'url': reverse('chat:rtc_config')},
+        'languages': [(code, LANGUAGE_LABELS[code]) for code in settings.MATCH_LANGUAGES],
+        'interests': [(code, INTEREST_LABELS[code]) for code in settings.MATCH_INTERESTS],
+        'relax_seconds': settings.MATCH_RELAX_SECONDS,
+    })
 
 
 @never_cache
