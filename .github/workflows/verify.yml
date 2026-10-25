@@ -102,7 +102,7 @@ jobs:
             -e DJANGO_DEBUG=0 -e DJANGO_SECRET_KEY="$(openssl rand -hex 40)" \
             -e DJANGO_ALLOWED_HOSTS=127.0.0.1 -e TRUST_PROXY=1 \
             -e REDIS_URL=redis://127.0.0.1:6379/0 -e METRICS_TOKEN=ci-token \
-            -e WS_MAX_PER_IP=1000 -e WS_CONNECT_RATE=1000 videochat
+            -e WS_MAX_PER_IP=1000 -e WS_CONNECT_RATE=1000 -e CONSENT_REQUIRED=0 videochat
           for attempt in $(seq 1 30); do
             if curl --fail --silent -H 'X-Forwarded-Proto: https' http://127.0.0.1:8000/health/; then break; fi
             sleep 1

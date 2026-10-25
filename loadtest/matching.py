@@ -60,6 +60,10 @@ async def current_client(i, args, result, release):
                 data = json.loads(await asyncio.wait_for(ws.recv(), deadline - time.perf_counter()))
                 if data['type'] == 'matched':
                     break
+                if data['type'] in ('consent_required', 'verification_required'):
+                    # Simulated users skip the consent page: run the server with CONSENT_REQUIRED=0.
+                    result['failures'][f"match:{data['type']}"] += 1
+                    return
                 if data['type'] == 'error':
                     result['errors'].append(data['message'])
             # The non-initiator found a waiting peer: its latency is pure server work.

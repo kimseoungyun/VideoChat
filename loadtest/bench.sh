@@ -10,6 +10,8 @@ REPEAT=${REPEAT:-3}
 export DJANGO_DEBUG=1 DATABASE_PATH=${DATABASE_PATH:-/tmp/videochat-load.sqlite3}
 # Every simulated user shares 127.0.0.1, so lift the per-IP limits for this run only.
 export WS_MAX_PER_IP=100000 WS_CONNECT_RATE=100000
+# Simulated users never see the consent page; the gate has its own server and e2e tests.
+export CONSENT_REQUIRED=0
 python backend/manage.py migrate -v 0
 
 serve() {

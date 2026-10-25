@@ -20,6 +20,8 @@ $env:DATABASE_PATH = Join-Path $root '.runtime\load.sqlite3'
 # Every simulated user shares 127.0.0.1, so lift the per-IP limits for this run only.
 $env:WS_MAX_PER_IP = '100000'
 $env:WS_CONNECT_RATE = '100000'
+# Simulated users never see the consent page; the gate has its own server and e2e tests.
+$env:CONSENT_REQUIRED = '0'
 & "$root\.venv\Scripts\python.exe" "$root\backend\manage.py" migrate -v 0
 $bases = foreach ($i in 0..($Workers - 1)) {
     $port = 8020 + $i
