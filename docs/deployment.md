@@ -28,6 +28,9 @@
 | `TURN_URLS`, `TURN_SECRET` | `turn:turn.example.com:3478?transport=udp,turns:turn.example.com:5349?transport=tcp`, coturn `static-auth-secret`과 같은 값 |
 | `METRICS_TOKEN` | Prometheus 스크레이프용 무작위 토큰 |
 | `WS_MAX_PER_IP`, `WS_CONNECT_RATE` | 기본 10, 60. 학교/회사처럼 IP 공유가 많은 대상이면 상향 |
+| `RTC_CONFIG_PER_IP` | 기본 300(분당). 매칭마다 1회 쓰므로 NAT 공유 규모에 맞춰 조정 |
+| `RESUME_GRACE_SECONDS` | 기본 15. 프록시가 끊긴 소켓을 정리하는 시간보다 길어야 재개가 의미 있음 |
+| `MATCH_RELAX_SECONDS` | 기본 10. 사용자 수가 적으면 줄여 대기 시간을 낮춤 |
 
 ## nginx (예시)
 

@@ -32,9 +32,17 @@
 | 브라우저 간 상호 운용 | 통과 (CI) | Chromium ↔ Firefox 영상 협상, 양방향 채팅, 종료 알림 |
 | 레거시 계정 마이그레이션 | 통과 | CustomUser 행이 같은 비밀번호 해시로 auth.User에 이동, 이름이 겹치면 기존 계정 유지. 로컬 DB 복사본에서도 확인(원본 DB 미변경) |
 | channel layer 과부하 | 통과 | 수신함 용량 5·20(로컬)·50(Linux)에서 동시 접속 100% 매칭. 매칭 알림 전달 실패를 주입하면 재시도로 매칭되고, 3번 실패하면 둘 다 대기열로 돌아가 다음 사용자와 매칭 |
+| 통화 재개 | 통과 | 소켓이 끊겨도 같은 매칭으로 재개, 양방향 채팅 유지, 토큰 1회용, 유예 시간이 지나면 상대에게 종료 알림 |
+| ICE restart | 통과 | `failed` 주입 후 initiator 재협상으로 영상 복구, `{"restart": 1}` 같은 잘못된 요청 신호 거부 |
+| 끊김 복구율 | 통과 | `tests/resilience.cjs` 20회: 신호 끊김 0/20 → 20/20, 미디어 실패 0/20 → 20/20 (개선 전 커밋과 비교), CI는 매 push 5회 |
+| 선호 매칭 | 통과 | 공통 관심사 우선, 동점은 오래 기다린 순, 언어 불일치 대기, 완화 후 매칭, 대기 중 재탐색, 허용 목록 밖 값 거부. e2e: 최대 3개 제한, 새로고침 후 유지, 양쪽에 공통 관심사 표시 |
+| 통화 통계 | 통과 | 양쪽이 보고해도 매칭당 1회 집계, 연결 시간 히스토그램, TURN 경유, ICE 복구 횟수 |
+| 신고 근거 | 통과 | 서버가 중계한 대화만 신고자·대상 구분해 저장, admin 읽기 전용 표시 |
+| 모니터링 | 통과 (CI) | `promtool check rules`, Prometheus 수집 확인, Grafana 대시보드 자동 등록 |
 | Docker | 통과 (CI) | 개발 compose 기동 후 `/health/`, 운영 이미지(Daphne, DEBUG=0)에서 `/metrics/` 토큰 검사와 실제 WebSocket 200명 매칭 100% |
 
-- `python backend/manage.py test chat main`: **28 tests, OK** (2026-10-25, 로컬과 CI)
+- `python backend/manage.py test chat main`: **35 tests, OK** (2026-10-25, 로컬과 CI)
+- `npm run test:e2e`(browser, rtc-config, report, preferences), `npm run test:resilience`: **PASS**
 - `makemigrations --check --dry-run`: **No changes detected**
 - `check --deploy`: 운영용 환경변수(무작위 SECRET_KEY)를 지정한 상태에서 **no issues**
 - `collectstatic --noinput`: 정적 파일 **134개 수집**
@@ -45,6 +53,7 @@
 ## 남은 검증 범위
 
 - 서로 다른 실제 네트워크/방화벽에서의 TURN relay, 실제 장치 음질/화질, Safari 및 모바일 실기기 검증
+- 실제 Wi-Fi↔LTE 전환에서의 ICE restart(로컬 검증은 상태 이벤트 주입)
 - 실제 HTTPS 도메인과 운영 프록시(nginx), coturn 설정과 릴레이 용량
 - 클라이언트와 서버를 다른 머신에 둔 부하 시험, 영상 미디어 부하
 - 외부 서비스 배포는 수행하지 않음(서버·도메인·TURN 계정 필요)
