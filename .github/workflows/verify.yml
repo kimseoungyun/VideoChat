@@ -15,6 +15,8 @@ jobs:
     env:
       REDIS_URL: redis://127.0.0.1:6379/0
       BASE_URL: http://127.0.0.1:8017/chat/
+      # Every test browser shares 127.0.0.1; the limits themselves are covered by server tests.
+      WS_CONNECT_RATE: '1000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,6 +45,7 @@ jobs:
           done
           pnpm test:e2e
           pnpm test:interop
+          pnpm test:resilience | tee test-results/resilience.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -67,6 +70,23 @@ jobs:
           done
           curl --fail --silent --output /dev/null http://127.0.0.1:8000/chat/
           docker compose down
+      - name: Monitoring stack (rules valid, Prometheus scrapes, Grafana provisions the dashboard)
+        run: |
+          docker run --rm -v "$PWD/deploy/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v3.1.0 check rules /m/alerts.yml
+          docker compose --profile monitoring up -d --build --wait
+          query='http://127.0.0.1:9090/api/v1/query?query=videochat_ws_active'
+          for attempt in $(seq 1 40); do
+            if curl -fs "$query" | grep -q '"result":\[{'; then break; fi
+            sleep 3
+          done
+          curl -fs "$query" | grep -q '"result":\[{'
+          curl -fs http://127.0.0.1:9090/api/v1/rules | grep -q CallSetupFailing
+          for attempt in $(seq 1 30); do
+            if curl -fs 'http://127.0.0.1:3000/api/search?query=VideoChat' | grep -q videochat-overview; then break; fi
+            sleep 2
+          done
+          curl -fs 'http://127.0.0.1:3000/api/search?query=VideoChat' | grep -q videochat-overview
+          docker compose --profile monitoring down
       - name: Production image (Daphne, DEBUG=0) with real WebSocket matching
         run: |
           docker build -t videochat .
@@ -87,4 +107,4 @@ jobs:
           python loadtest/matching.py --base http://127.0.0.1:8000 --clients 200 --ramp 2 | tee result.json
           python -c "import json; r = json.load(open('result.json')); assert r['correctly_paired_pct'] == 100, r"
       - if: failure()
-        run: docker compose logs; docker logs web || true
+        run: docker compose --profile monitoring logs; docker logs web || true

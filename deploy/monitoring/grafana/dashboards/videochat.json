@@ -1,0 +1,100 @@
+{
+  "uid": "videochat-overview",
+  "title": "VideoChat overview",
+  "tags": ["videochat"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {"type": "row", "title": "지금", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}, "collapsed": false, "panels": []},
+    {
+      "type": "stat", "title": "접속 중", "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(videochat_ws_active)"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none"}
+    },
+    {
+      "type": "stat", "title": "매칭 대기 중", "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(videochat_queue_waiting)"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none"}
+    },
+    {
+      "type": "stat", "title": "통화 연결 성공률 (1h)", "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(increase(videochat_calls_total{outcome=\"connected\"}[1h])) / clamp_min(sum(increase(videochat_calls_total[1h])), 1)"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1,
+        "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.8}, {"color": "green", "value": 0.95}]}}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "type": "stat", "title": "TURN 경유 비율 (1h)", "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(increase(videochat_calls_relayed_total[1h])) / clamp_min(sum(increase(videochat_calls_total{outcome=\"connected\"}[1h])), 1)"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none"}
+    },
+    {"type": "row", "title": "매칭", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5}, "collapsed": false, "panels": []},
+    {
+      "type": "timeseries", "title": "분당 매칭 (선호 적합도별)", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (kind) (rate(videochat_matches_by_preference_total[5m])) * 60", "legendFormat": "{{kind}}"}],
+      "fieldConfig": {"defaults": {"custom": {"stacking": {"mode": "normal"}, "fillOpacity": 30}}}
+    },
+    {
+      "type": "timeseries", "title": "매칭까지 대기 시간", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(videochat_match_wait_seconds_bucket[10m])))", "legendFormat": "p50"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(videochat_match_wait_seconds_bucket[10m])))", "legendFormat": "p95"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {"type": "row", "title": "통화 품질과 복구", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 14}, "collapsed": false, "panels": []},
+    {
+      "type": "timeseries", "title": "통화 연결 결과", "gridPos": {"h": 8, "w": 8, "x": 0, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum by (outcome) (increase(videochat_calls_total[10m]))", "legendFormat": "{{outcome}}"}]
+    },
+    {
+      "type": "timeseries", "title": "연결 소요 시간 p95", "gridPos": {"h": 8, "w": 8, "x": 8, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(videochat_call_setup_seconds_bucket[10m])))", "legendFormat": "p95"}],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "type": "timeseries", "title": "끊김 복구 (재개 / ICE restart)", "gridPos": {"h": 8, "w": 8, "x": 16, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (outcome) (increase(videochat_sessions_resumed_total[10m]))", "legendFormat": "resume {{outcome}}"},
+        {"refId": "B", "expr": "sum by (outcome) (increase(videochat_ice_restarts_total[10m]))", "legendFormat": "ICE {{outcome}}"}
+      ]
+    },
+    {"type": "row", "title": "남용 대응과 용량", "gridPos": {"h": 1, "w": 24, "x": 0, "y": 23}, "collapsed": false, "panels": []},
+    {
+      "type": "timeseries", "title": "거부된 요청", "gridPos": {"h": 8, "w": 8, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum by (reason) (rate(videochat_ws_rejected_total[5m]))", "legendFormat": "ws {{reason}}"},
+        {"refId": "B", "expr": "sum by (scope) (rate(videochat_http_ratelimited_total[5m]))", "legendFormat": "http {{scope}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "type": "timeseries", "title": "신고와 자동 제한", "gridPos": {"h": 8, "w": 8, "x": 8, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"refId": "A", "expr": "sum(increase(videochat_reports_total[1h]))", "legendFormat": "reports"},
+        {"refId": "B", "expr": "sum(increase(videochat_bans_total[1h]))", "legendFormat": "bans"}
+      ]
+    },
+    {
+      "type": "timeseries", "title": "channel layer 유실", "gridPos": {"h": 8, "w": 8, "x": 16, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"refId": "A", "expr": "sum(increase(videochat_channel_full_dropped_total[5m]))", "legendFormat": "dropped"}]
+    }
+  ]
+}

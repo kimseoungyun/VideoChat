@@ -1,0 +1,44 @@
+groups:
+  - name: videochat
+    rules:
+      - alert: VideoChatDown
+        expr: up{job="videochat"} == 0
+        for: 1m
+        labels: {severity: page}
+        annotations:
+          summary: /metrics/ unreachable (process down or Redis unavailable)
+      - alert: CallSetupFailing
+        # Matched but media never connected: TURN missing/overloaded or a client regression.
+        expr: >
+          sum(increase(videochat_calls_total{outcome="failed"}[15m]))
+          / clamp_min(sum(increase(videochat_calls_total[15m])), 1) > 0.2
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: More than 20% of calls fail to connect media
+      - alert: MatchWaitHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(videochat_match_wait_seconds_bucket[10m]))) > 30
+        for: 10m
+        labels: {severity: warn}
+        annotations:
+          summary: p95 time to a partner above 30s (too few users or matching stalled)
+      - alert: ChannelLayerDropping
+        expr: increase(videochat_channel_full_dropped_total[5m]) > 0
+        labels: {severity: warn}
+        annotations:
+          summary: Channel-layer inbox stayed full; raise CHANNEL_CAPACITY or add processes
+      - alert: ResumesExpiring
+        # Calls lost to reconnects that did not make it within the grace period.
+        expr: >
+          sum(increase(videochat_sessions_resumed_total{outcome="expired"}[30m]))
+          / clamp_min(sum(increase(videochat_sessions_suspended_total[30m])), 1) > 0.5
+        for: 15m
+        labels: {severity: warn}
+        annotations:
+          summary: Most dropped calls are not resumed; check RESUME_GRACE_SECONDS and proxy timeouts
+      - alert: AbuseRejectSpike
+        expr: sum(rate(videochat_ws_rejected_total[5m])) > 1
+        for: 5m
+        labels: {severity: warn}
+        annotations:
+          summary: WebSocket rejections above 1/s (attack, or limits too tight for a shared NAT)

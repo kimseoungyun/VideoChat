@@ -15,6 +15,8 @@ services:
     command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000 --noreload"
     environment:
       DJANGO_DEBUG: "1"
+      # "web" is the Host header Prometheus sends from inside the compose network.
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,web
       REDIS_URL: redis://redis:6379/0
       DATABASE_PATH: /data/db.sqlite3
     ports:
@@ -24,5 +26,27 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+  # docker compose --profile monitoring up: Prometheus :9090, Grafana :3000 (anonymous viewer)
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on: [web]
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: [prometheus]
 volumes:
   app-data:
