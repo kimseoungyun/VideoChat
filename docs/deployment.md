@@ -18,7 +18,9 @@
 
 | 이름 | 운영 값 |
 | --- | --- |
-| `DJANGO_DEBUG` | `0` |
+| `DJANGO_DEBUG` | `0` (기본값도 0. 개발에서만 `1`) |
+| `ICE_RELAY_ONLY` | `1`이면 TURN만 사용해 상대에게 공인 IP를 노출하지 않음(TURN 비용 증가) |
+| `REPORT_RETENTION_DAYS` | 신고·대화 보관 기간, 기본 90. `purge_reports`를 매일 실행 |
 | `DJANGO_SECRET_KEY` | 50자 이상 무작위. 게스트 IP 해시에도 쓰이므로 바꾸면 기존 신고 누적/차단이 초기화됨 |
 | `DJANGO_ALLOWED_HOSTS` | 서비스 도메인 |
 | `TRUST_PROXY` | `1` (nginx가 `X-Forwarded-For`, `X-Forwarded-Proto`를 덮어쓸 때만) |
@@ -42,6 +44,7 @@ server {
     # ssl_certificate ...;
     location /static/ { alias /srv/videochat/backend/staticfiles/; expires 7d; }
     location /metrics/ { allow 10.0.0.0/8; deny all; proxy_pass http://videochat; }
+    location /admin/   { allow 10.0.0.0/8; deny all; proxy_pass http://videochat; }  # 신고 대화를 볼 수 있음
     location / {
         proxy_pass http://videochat;
         proxy_http_version 1.1;

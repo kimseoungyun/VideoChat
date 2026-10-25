@@ -60,6 +60,7 @@ Python 3.12와 Redis가 필요합니다. Node.js 22 이상은 브라우저 테�
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:REDIS_URL = 'redis://127.0.0.1:6379/0'
+$env:DJANGO_DEBUG = '1'   # 기본값은 꺼짐: 설정 없이 띄운 서버가 개발 모드로 돌지 않게
 .venv\Scripts\python.exe backend/manage.py migrate
 .venv\Scripts\python.exe backend/manage.py runserver 127.0.0.1:8000
 ```
@@ -72,7 +73,7 @@ Redis는 미리 실행해 두세요(`docker compose up redis -d`). 전체 개발
 Redis를 실행한 상태에서 다음을 실행합니다.
 
 ```powershell
-.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 35개: 매칭·선호·재개·시그널링·신고·제한·지표·계정·마이그레이션·과부하
+.venv\Scripts\python.exe backend/manage.py test chat main -v 2   # 44개: 매칭·선호·재개·시그널링·신고·제한·지표·계정·마이그레이션·과부하
 npm install
 npx playwright install chromium firefox
 $env:BASE_URL = 'http://127.0.0.1:8000/chat/'
@@ -104,6 +105,8 @@ npm run test:resilience  # 통화 중 신호/미디어 끊김 후 같은 대화�
 | [matching-preferences](docs/matching-preferences.md) | 언어·관심사 매칭 규칙과 대기 시간 트레이드오프 측정 |
 | [architecture](docs/architecture.md) | 책임 분리, 매칭 상태 전이, 장애 처리, 확장 제약 |
 | [operations](docs/operations.md) | 요청 제한, 신고/차단 정책, 지표, Grafana·경보 |
+| [competitive-analysis](docs/competitive-analysis.md) | Azar·OmeTV·Chatroulette 등 유사 서비스와 국내외 규제 비교, 보완점 |
+| [code-review](docs/code-review.md) | 독립 코드 리뷰 15건과 수정·검증 내역 |
 | [worklog](docs/worklog.md) | 날짜별 작업 기록: 무엇을, 왜, 어떤 결과로 |
 | [verification](docs/verification.md) | 자동 검증 범위와 남은 검증 |
 | [deployment](docs/deployment.md) | 운영 배포 구성과 점검 목록 |

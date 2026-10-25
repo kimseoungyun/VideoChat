@@ -38,11 +38,12 @@
 | 선호 매칭 | 통과 | 공통 관심사 우선, 동점은 오래 기다린 순, 언어 불일치 대기, 완화 후 매칭, 대기 중 재탐색, 허용 목록 밖 값 거부. e2e: 최대 3개 제한, 새로고침 후 유지, 양쪽에 공통 관심사 표시 |
 | 통화 통계 | 통과 | 양쪽이 보고해도 매칭당 1회 집계, 연결 시간 히스토그램, TURN 경유, ICE 복구 횟수 |
 | 신고 근거 | 통과 | 서버가 중계한 대화만 신고자·대상 구분해 저장, admin 읽기 전용 표시 |
+| 코드 리뷰 수정 | 통과 | 관리자 로그인 제한, 신고 시간당 제한, 다이얼로그를 연 시점의 상대를 신고(e2e 포함), 매칭 확정 실패 후 재탐색과 ping 때 재진입, 조건에 맞는 후보 우선, 대기 중 제재된 후보 제외, 재개 후 상대 채널 복구, TURN 전용 ICE, 보관 기한 삭제. 핵심 4건은 수정 전 코드에서 실패하는 것도 확인([code-review](code-review.md)) |
 | 모니터링 | 통과 (CI) | `promtool check rules`, Prometheus 수집 확인, Grafana 대시보드 자동 등록 |
 | Docker | 통과 (CI) | 개발 compose 기동 후 `/health/`, 운영 이미지(Daphne, DEBUG=0)에서 `/metrics/` 토큰 검사와 실제 WebSocket 200명 매칭 100% |
 
-- `python backend/manage.py test chat main`: **35 tests, OK** (2026-10-25, 로컬과 CI)
-- `npm run test:e2e`(browser, rtc-config, report, preferences), `npm run test:resilience`: **PASS**
+- `python backend/manage.py test chat main`: **44 tests, OK** (2026-10-25, 로컬과 CI)
+- `npm run test:e2e`(browser, rtc-config, report, report-race, preferences), `npm run test:resilience`: **PASS**
 - `makemigrations --check --dry-run`: **No changes detected**
 - `check --deploy`: 운영용 환경변수(무작위 SECRET_KEY)를 지정한 상태에서 **no issues**
 - `collectstatic --noinput`: 정적 파일 **134개 수집**
